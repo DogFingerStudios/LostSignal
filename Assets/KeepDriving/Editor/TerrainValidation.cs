@@ -22,7 +22,7 @@ namespace KeepDriving.Editor
                 bool terrainHit = false;
                 foreach (var hit in Physics.RaycastAll(p + Vector3.up * 30, Vector3.down, 40))
                     if (hit.collider is TerrainCollider && Mathf.Abs(hit.point.y - sampled) < .08f) terrainHit = true;
-                Check(terrainHit, "Native terrain collision");
+                Check(terrainHit, "Native _terrain collision");
             }
             // Exercise Unity's paint storage, then restore the original grass coverage.
             float[,,] original = data.GetAlphamaps(250, 250, 1, 1);
@@ -32,7 +32,7 @@ namespace KeepDriving.Editor
             data.SetAlphamaps(250, 250, original);
             EditorUtility.SetDirty(data); AssetDatabase.SaveAssets();
             DrivingValidation.Validate();
-            Debug.Log("NATIVE_TERRAIN_VALIDATION_PASSED: native terrain, hills, TerrainCollider, paint layers, painting, driving, braking, slope traversal");
+            Debug.Log("NATIVE_TERRAIN_VALIDATION_PASSED: native _terrain, hills, TerrainCollider, paint layers, painting, driving, braking, slope traversal");
         }
         static void Check(bool result, string label) { if (!result) throw new System.Exception("Terrain validation failed: " + label); }
     }
