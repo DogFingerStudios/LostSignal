@@ -21,6 +21,7 @@ namespace KeepDriving
         Renderer seatedDriver, seatedTorso;
         TrailRenderer[] skidMarks;
         Material skidMaterial;
+        TerrainStream terrainStream;
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
@@ -28,6 +29,7 @@ namespace KeepDriving
         {
             car.isKinematic = true;
             car.interpolation = RigidbodyInterpolation.Interpolate;
+            terrainStream = new TerrainStream(gameObject.scene, car.position);
             LockCursor(); UpdateVisibility();
         }
         void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
@@ -68,7 +70,7 @@ namespace KeepDriving
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
                 player.Move((movement * (ShiftHeld ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
-                if (player.transform.position.y < -20) { player.enabled = false; player.transform.position = new Vector3(0, 2, -5); player.enabled = true; }
+                if (player.transform.position.y < -20) { player.enabled = false; player.transform.position = terrainStream.SpawnPosition; player.enabled = true; }
             }
             if (driving && mouse.rightButton.isPressed) { if (!horn.isPlaying) horn.Play(); }
             else if (horn.isPlaying) horn.Stop();
@@ -83,6 +85,10 @@ namespace KeepDriving
 
         void FixedUpdate()
         {
+            Vector3 focus = driving ? car.position : player.transform.position;
+            if (terrainStream?.Update(focus) == true && skidMarks != null)
+                foreach (var mark in skidMarks) mark.Clear();
+
             Vector2 input = driving ? ReadMovement() : Vector2.zero;
             bool braking = !driving || (Keyboard.current != null && Keyboard.current.spaceKey.isPressed);
             Vector3 forward = Vector3.ProjectOnPlane(car.rotation * Vector3.forward, Vector3.up).normalized;
@@ -115,7 +121,7 @@ namespace KeepDriving
                 car.MoveRotation(rotation);
                 car.MovePosition(next);
             }
-            else { speed = 0; carVelocity = Vector3.zero; } // Stop at the edge of the test area.
+            else { speed = 0; carVelocity = Vector3.zero; }
         }
 
         bool GroundAt(Vector3 point, out RaycastHit ground)
@@ -241,13 +247,20 @@ namespace KeepDriving
                 skidMarks[i].emitting = skidding && contact;
             }
         }
-        void OnDestroy() { if (skidMaterial) Destroy(skidMaterial); }
+        void OnDestroy()
+        {
+            terrainStream?.Dispose();
+            if (skidMaterial) Destroy(skidMaterial);
+        }
         void OnGUI()
         {
             GUI.Box(new Rect(16, 16, 650, 80), driving
                 ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit"
                 : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit");
             if (driving) GUI.Box(new Rect(16, 104, 200, 30), $"{carVelocity.magnitude * 3.6f:0} km/h" + (skidding ? "   SKIDDING" : ""));
+            Vector3 position = driving ? car.transform.position : player.transform.position;
+            if (terrainStream?.GetTile(position) is Vector2Int tile)
+                GUI.Box(new Rect(16, driving ? 142 : 104, 200, 30), $"Tile ({tile.x}, {tile.y})");
             if (!driving && NearCar()) GUI.Box(new Rect(Screen.width / 2 - 90, Screen.height / 2 + 40, 180, 32), "Press E to enter car");
             if (Time.unscaledTime < quitHintUntil) GUI.Box(new Rect(Screen.width / 2 - 150, 110, 300, 32), "Press Esc again quickly to quit");
         }
