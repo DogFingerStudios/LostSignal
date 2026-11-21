@@ -22,6 +22,8 @@ namespace KeepDriving
         TrailRenderer[] skidMarks;
         Material skidMaterial;
         TerrainStream terrainStream;
+        FieldReceiverUI fieldReceiver;
+        readonly Minimap minimap = new Minimap();
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
@@ -33,11 +35,37 @@ namespace KeepDriving
             LockCursor(); UpdateVisibility();
         }
         void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
-        void OnApplicationFocus(bool focus) { if (focus) LockCursor(); }
+        void OnApplicationFocus(bool focus)
+        {
+            if (!focus) return;
+            if (fieldReceiver?.IsOpen == true) UnlockCursor();
+            else LockCursor();
+        }
+
+        static void UnlockCursor() { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
 
         void Update()
         {
             var keys = Keyboard.current;
+            if (fieldReceiver?.IsOpen == true)
+            {
+                if (keys != null && (keys.iKey.wasPressedThisFrame || keys.escapeKey.wasPressedThisFrame))
+                {
+                    fieldReceiver.Close();
+                    LockCursor();
+                }
+                return;
+            }
+            if (keys != null && keys.iKey.wasPressedThisFrame)
+            {
+                fieldReceiver ??= new FieldReceiverUI(transform);
+                fieldReceiver.Open();
+                lastEscape = -10f;
+                quitHintUntil = 0;
+                if (horn.isPlaying) horn.Stop();
+                UnlockCursor();
+                return;
+            }
             var mouse = Mouse.current;
             if (keys == null || mouse == null) return;
             if (keys.escapeKey.wasPressedThisFrame)
@@ -85,6 +113,7 @@ namespace KeepDriving
 
         void FixedUpdate()
         {
+            if (fieldReceiver?.IsOpen == true) return;
             Vector3 focus = driving ? car.position : player.transform.position;
             if (terrainStream?.Update(focus) == true && skidMarks != null)
                 foreach (var mark in skidMarks) mark.Clear();
@@ -141,6 +170,7 @@ namespace KeepDriving
 
         void LateUpdate()
         {
+            if (fieldReceiver?.IsOpen == true) return;
             Quaternion look = Quaternion.Euler(pitch, yaw, 0);
             Vector3 anchor = driving ? car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f)) : player.transform.position + Vector3.up * .65f;
             Vector3 position = anchor;
@@ -247,18 +277,30 @@ namespace KeepDriving
                 skidMarks[i].emitting = skidding && contact;
             }
         }
+        void OnDisable()
+        {
+            if (fieldReceiver?.IsOpen != true) return;
+            fieldReceiver.Close();
+            LockCursor();
+        }
+
         void OnDestroy()
         {
+            fieldReceiver?.Dispose();
+            minimap.Dispose();
             terrainStream?.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
         }
         void OnGUI()
         {
+            if (fieldReceiver?.IsOpen == true) return;
             GUI.Box(new Rect(16, 16, 650, 80), driving
-                ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit"
-                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit");
+                ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver"
+                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver");
             if (driving) GUI.Box(new Rect(16, 104, 200, 30), $"{carVelocity.magnitude * 3.6f:0} km/h" + (skidding ? "   SKIDDING" : ""));
             Vector3 position = driving ? car.transform.position : player.transform.position;
+            if (Event.current.type == EventType.Repaint)
+                minimap.Draw(gameObject.scene, position, driving ? car.rotation.eulerAngles.y : yaw);
             if (terrainStream?.GetTile(position) is Vector2Int tile)
                 GUI.Box(new Rect(16, driving ? 142 : 104, 200, 30), $"Tile ({tile.x}, {tile.y})");
             if (!driving && NearCar()) GUI.Box(new Rect(Screen.width / 2 - 90, Screen.height / 2 + 40, 180, 32), "Press E to enter car");
