@@ -80,7 +80,12 @@ namespace KeepDriving
                 lastEscape = Time.unscaledTime;
                 quitHintUntil = Time.unscaledTime + 1.5f;
             }
-            if (keys.backquoteKey.wasPressedThisFrame) { thirdPerson = !thirdPerson; UpdateVisibility(); }
+            
+            if (keys.backquoteKey.wasPressedThisFrame && !driving) 
+            { 
+                thirdPerson = !thirdPerson; UpdateVisibility(); 
+            }
+            
             Vector2 look = mouse.delta.ReadValue() * .12f;
             yaw += look.x;
             pitch = Mathf.Clamp(pitch - look.y, -75f, 75f);
@@ -194,6 +199,8 @@ namespace KeepDriving
         }
 
         bool NearCar() => Vector3.Distance(player.transform.position, car.GetComponent<Collider>().ClosestPoint(player.transform.position)) < 2f;
+
+        bool _bOriginalThirdPersonState = true;
         void Enter()
         {
             driving = true;
@@ -201,8 +208,11 @@ namespace KeepDriving
             EnsureDriver();
             yaw = car.rotation.eulerAngles.y;
             pitch = 0;
+            _bOriginalThirdPersonState = thirdPerson;
+            thirdPerson = true;
             UpdateVisibility();
         }
+
         void TryExit()
         {
             Vector3[] offsets = { Vector3.left * 1.8f, Vector3.right * 1.8f, Vector3.back * 3.3f, Vector3.forward * 3.3f };
@@ -213,7 +223,14 @@ namespace KeepDriving
                 candidate.y = ground.point.y + 1.05f;
                 int count = Physics.OverlapCapsuleNonAlloc(candidate + Vector3.down * .55f, candidate + Vector3.up * .55f, .43f, exitHits, ~0, QueryTriggerInteraction.Ignore);
                 bool blocked = false;
-                for (int i = 0; i < count; i++) if (!exitHits[i].transform.IsChildOf(player.transform)) blocked = true;
+                for (int i = 0; i < count; i++)
+                {
+                    if (!exitHits[i].transform.IsChildOf(player.transform))
+                    {
+                        blocked = true;
+                    }
+                }
+
                 if (blocked) continue;
                 player.transform.position = candidate;
                 player.enabled = true;
@@ -224,6 +241,7 @@ namespace KeepDriving
                 skidding = false;
                 if (!car.isKinematic) car.linearVelocity = Vector3.zero;
                 horn.Stop();
+                thirdPerson = _bOriginalThirdPersonState;
                 UpdateVisibility();
                 return;
             }
