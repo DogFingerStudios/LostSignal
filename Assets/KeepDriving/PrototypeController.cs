@@ -31,7 +31,19 @@ namespace KeepDriving
         {
             car.isKinematic = true;
             car.interpolation = RigidbodyInterpolation.Interpolate;
-            terrainStream = new TerrainStream(gameObject.scene, car.position);
+            terrainStream = new TerrainStream(gameObject.scene, player.transform.position);
+            if (terrainStream.HasSource)
+            {
+                Vector3 spawn = terrainStream.SpawnPosition;
+                var carCollider = car.GetComponent<Collider>();
+                var clearance = carCollider.bounds;
+                clearance.Expand(player.radius * 2);
+                if (spawn.x >= clearance.min.x && spawn.x <= clearance.max.x
+                    && spawn.z >= clearance.min.z && spawn.z <= clearance.max.z)
+                    car.position += Vector3.forward * 5f;
+                PlacePlayer(spawn);
+                terrainStream.Update(spawn);
+            }
             LockCursor(); UpdateVisibility();
         }
         void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
@@ -103,10 +115,21 @@ namespace KeepDriving
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
                 player.Move((movement * (ShiftHeld ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
-                if (player.transform.position.y < -20) { player.enabled = false; player.transform.position = terrainStream.SpawnPosition; player.enabled = true; }
+                if (player.transform.position.y < -20 && terrainStream.HasSource)
+                {
+                    PlacePlayer(terrainStream.SpawnPosition);
+                    verticalSpeed = 0;
+                }
             }
             if (driving && mouse.rightButton.isPressed) { if (!horn.isPlaying) horn.Play(); }
             else if (horn.isPlaying) horn.Stop();
+        }
+
+        void PlacePlayer(Vector3 position)
+        {
+            player.enabled = false;
+            player.transform.position = position;
+            player.enabled = true;
         }
 
         Vector2 ReadMovement()

@@ -6,7 +6,7 @@ namespace KeepDriving
 {
     internal sealed class TerrainStream : System.IDisposable
     {
-        private const float PreloadDistance = 85f;
+        private const int WindowRadius = 2;
         private const float OriginShiftDistance = 1600f;
 
         private readonly Scene _scene;
@@ -18,6 +18,7 @@ namespace KeepDriving
         private readonly List<Vector2Int> _expired = new List<Vector2Int>();
         private readonly List<GameObject> _roots = new List<GameObject>();
         private Vector2Int _originTile;
+        private Vector2Int? _windowCenter;
 
         public TerrainStream(Scene scene, Vector3 start)
         {
@@ -45,7 +46,10 @@ namespace KeepDriving
             }
         }
 
-        public Vector3 SpawnPosition => new Vector3(0, 2, -5) - TileOffset(_originTile);
+        public bool HasSource => _source != null;
+
+        public Vector3 SpawnPosition => _origin + new Vector3(_size.x / 2,
+            _sourceData.GetInterpolatedHeight(.5f, .5f) + 1f, _size.z / 2) - TileOffset(_originTile);
 
         private Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * _size.x, 0, tile.y * _size.z);
 
@@ -66,7 +70,6 @@ namespace KeepDriving
             }
 
             Vector2Int center = WorldTile(focus);
-            bool changed = false;
             bool shifted = Mathf.Abs(focus.x) > OriginShiftDistance || Mathf.Abs(focus.z) > OriginShiftDistance;
             if (shifted)
             {
@@ -84,54 +87,69 @@ namespace KeepDriving
                     }
 
                     _originTile = center;
-                    focus -= shift;
-                    changed = true;
                 }
             }
 
-            float marginX = Mathf.Min(PreloadDistance, _size.x * .45f);
-            float marginZ = Mathf.Min(PreloadDistance, _size.z * .45f);
-            Vector3 margin = new Vector3(marginX, 0, marginZ);
-            Vector2Int min = WorldTile(focus - margin);
-            Vector2Int max = WorldTile(focus + margin);
-            for (int z = min.y; z <= max.y; z++)
-                for (int x = min.x; x <= max.x; x++)
+            if (_windowCenter != center)
+            {
+                LoadWindow(center);
+                _windowCenter = center;
+            }
+            else if (shifted)
+            {
+                Physics.SyncTransforms();
+            }
+            return shifted;
+        }
+
+        private void LoadWindow(Vector2Int center)
+        {
+            for (int z = center.y - WindowRadius; z <= center.y + WindowRadius; z++)
+                for (int x = center.x - WindowRadius; x <= center.x + WindowRadius; x++)
                 {
                     var key = new Vector2Int(x, z);
-                    if (_tiles.ContainsKey(key))
-                    { 
-                        continue;
+                    if (_tiles.ContainsKey(key)) continue;
+                    if (key == Vector2Int.zero)
+                    {
+                        _source.gameObject.SetActive(true);
+                        _tiles.Add(key, _source);
                     }
-                    _tiles.Add(key, CreateTile(key));
-                    changed = true;
+                    else
+                    {
+                        _tiles.Add(key, CreateTile(key));
+                    }
                 }
 
             _expired.Clear();
             foreach (var entry in _tiles)
-                if (entry.Key != Vector2Int.zero && (Mathf.Abs(entry.Key.x - center.x) > 1 
-                    || Mathf.Abs(entry.Key.y - center.y) > 1))
+                if (Mathf.Abs(entry.Key.x - center.x) > WindowRadius
+                    || Mathf.Abs(entry.Key.y - center.y) > WindowRadius)
                 {
                     _expired.Add(entry.Key);
                 }
 
             foreach (Vector2Int key in _expired)
             {
-                DestroyTile(_tiles[key]);
+                // Keep the authored asset and scene object available for the return trip.
+                if (key == Vector2Int.zero)
+                {
+                    _source.SetNeighbors(null, null, null, null);
+                    _source.gameObject.SetActive(false);
+                }
+                else
+                {
+                    DestroyTile(_tiles[key]);
+                }
                 _tiles.Remove(key);
-                changed = true;
             }
 
-            if (changed)
+            foreach (var entry in _tiles)
             {
-                foreach (var entry in _tiles)
-                {
-                    Vector2Int key = entry.Key;
-                    entry.Value.SetNeighbors(Find(key + Vector2Int.left), Find(key + Vector2Int.up),
-                        Find(key + Vector2Int.right), Find(key + Vector2Int.down));
-                }
-                Physics.SyncTransforms();
+                Vector2Int key = entry.Key;
+                entry.Value.SetNeighbors(Find(key + Vector2Int.left), Find(key + Vector2Int.up),
+                    Find(key + Vector2Int.right), Find(key + Vector2Int.down));
             }
-            return shifted;
+            Physics.SyncTransforms();
         }
 
         private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out Terrain terrain) ? terrain : null;
@@ -207,8 +225,9 @@ namespace KeepDriving
         public void Dispose()
         {
             if (_source)
-            { 
+            {
                 _source.SetNeighbors(null, null, null, null);
+                if (_scene.isLoaded) _source.gameObject.SetActive(true);
             }
             foreach (var entry in _tiles)
             {
