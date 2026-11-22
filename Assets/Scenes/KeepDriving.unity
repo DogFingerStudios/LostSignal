@@ -723,7 +723,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.TerrainStream
   worldSeed: 271828
-  waterCoverage: 75
+  waterCoverage: 31
   treeDensity: 50
   treePrefabs:
   - {fileID: 1743353957770956, guid: 82a6bf9ca38d9d443997ccec084ba669, type: 3}
