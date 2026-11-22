@@ -14,8 +14,9 @@ namespace KeepDriving
         private readonly Vector3 _tileSize;
         private readonly Vector2 _woodlandOffset;
         private readonly int _columns, _rows;
+        private readonly float _spawnClearingRadiusSquared;
 
-        public TreeGenerator(int seed, int density, int prefabCount, Vector3 tileSize)
+        public TreeGenerator(int seed, int density, int prefabCount, Vector3 tileSize, float spawnClearingRadius)
         {
             _seed = seed;
             _density = Mathf.Clamp01(density / 100f);
@@ -23,13 +24,14 @@ namespace KeepDriving
             _tileSize = tileSize;
             _columns = Mathf.CeilToInt(tileSize.x / CellSize);
             _rows = Mathf.CeilToInt(tileSize.z / CellSize);
+            _spawnClearingRadiusSquared = spawnClearingRadius * spawnClearingRadius;
             _woodlandOffset = new Vector2(Random01(0, 0, 6), Random01(0, 0, 7)) * 256f;
         }
 
         public TreeInstance[] GenerateTile(Vector2Int key, float[,] heights, RiverGenerator.Tile water,
             CancellationToken token)
         {
-            if (key == Vector2Int.zero || _density <= 0 || _prefabCount == 0)
+            if (_density <= 0 || _prefabCount == 0)
                 return System.Array.Empty<TreeInstance>();
 
             var trees = new List<TreeInstance>();
@@ -42,6 +44,8 @@ namespace KeepDriving
                     int cellZ = unchecked(key.y * _rows + z);
                     float u = (x + Mathf.Lerp(.15f, .85f, Random01(cellX, cellZ, 1))) / _columns;
                     float v = (z + Mathf.Lerp(.15f, .85f, Random01(cellX, cellZ, 2))) / _rows;
+                    if (key == Vector2Int.zero && InSpawnClearing(u, v, _tileSize, _spawnClearingRadiusSquared))
+                        continue;
                     float woods = Mathf.PerlinNoise((key.x + u) * _tileSize.x / 155f + _woodlandOffset.x,
                         (key.y + v) * _tileSize.z / 155f + _woodlandOffset.y);
                     float chance = Mathf.Lerp(_density * Mathf.SmoothStep(.08f, 1f, woods), 1f,
@@ -64,6 +68,13 @@ namespace KeepDriving
                 }
             }
             return trees.ToArray();
+        }
+
+        internal static bool InSpawnClearing(float u, float v, Vector3 tileSize, float radiusSquared)
+        {
+            float x = (u - .5f) * tileSize.x;
+            float z = (v - .5f) * tileSize.z;
+            return x * x + z * z <= radiusSquared;
         }
 
         private bool TrySampleGround(float[,] heights, float u, float v, out float elevation)

@@ -24,6 +24,8 @@ namespace KeepDriving
         TrailRenderer[] skidMarks;
         Material skidMaterial;
         FieldReceiverUI fieldReceiver;
+        TerminalScreen terminalScreen;
+        Terminal activeTerminal;
         readonly Minimap minimap = new Minimap();
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
@@ -34,14 +36,8 @@ namespace KeepDriving
             car.interpolation = RigidbodyInterpolation.Interpolate;
             if (terrainStream && terrainStream.HasSource)
             {
-                Vector3 spawn = terrainStream.SpawnPosition;
-                var carCollider = car.GetComponent<Collider>();
-                var clearance = carCollider.bounds;
-                clearance.Expand(player.radius * 2);
-                if (spawn.x >= clearance.min.x && spawn.x <= clearance.max.x
-                    && spawn.z >= clearance.min.z && spawn.z <= clearance.max.z)
-                    car.position += Vector3.forward * 5f;
-                PlacePlayer(spawn);
+                car.position = terrainStream.VehicleSpawnPosition;
+                PlacePlayer(terrainStream.SpawnPosition);
             }
             LockCursor(); UpdateVisibility();
         }
@@ -49,7 +45,11 @@ namespace KeepDriving
         void OnApplicationFocus(bool focus)
         {
             if (!focus) return;
-            if (fieldReceiver?.IsOpen == true) UnlockCursor();
+            if (ModalOpen)
+            {
+                UnlockCursor();
+                if (terminalScreen?.IsOpen == true) terminalScreen.FocusCommand();
+            }
             else LockCursor();
         }
 
@@ -60,6 +60,12 @@ namespace KeepDriving
             if (terrainStream) terrainStream.Pump(driving ? car.position : player.transform.position);
             if (WaitingForTerrain) return;
             var keys = Keyboard.current;
+            if (terminalScreen?.IsOpen == true)
+            {
+                if (!activeTerminal || !activeTerminal.isActiveAndEnabled || keys?.escapeKey.wasPressedThisFrame == true)
+                    CloseTerminal();
+                return;
+            }
             if (fieldReceiver?.IsOpen == true)
             {
                 if (keys != null && (keys.iKey.wasPressedThisFrame || keys.escapeKey.wasPressedThisFrame))
@@ -80,7 +86,7 @@ namespace KeepDriving
                 return;
             }
             var mouse = Mouse.current;
-            if (keys == null || mouse == null) return;
+            if (keys == null) return;
             if (keys.escapeKey.wasPressedThisFrame)
             {
                 if (Time.unscaledTime - lastEscape <= .4f)
@@ -99,7 +105,17 @@ namespace KeepDriving
                 thirdPerson = !thirdPerson; UpdateVisibility(); 
             }
             
-            Vector2 look = mouse.delta.ReadValue() * .12f;
+            if (!driving && keys.eKey.wasPressedThisFrame)
+            {
+                var terminal = Terminal.FindNearby(player.transform.position);
+                if (terminal)
+                {
+                    OpenTerminal(terminal);
+                    return;
+                }
+            }
+
+            Vector2 look = mouse != null ? mouse.delta.ReadValue() * .12f : Vector2.zero;
             yaw += look.x;
             pitch = Mathf.Clamp(pitch - look.y, -75f, 75f);
             if (keys.eKey.wasPressedThisFrame)
@@ -123,8 +139,25 @@ namespace KeepDriving
                     verticalSpeed = 0;
                 }
             }
-            if (driving && mouse.rightButton.isPressed) { if (!horn.isPlaying) horn.Play(); }
+            if (driving && mouse?.rightButton.isPressed == true) { if (!horn.isPlaying) horn.Play(); }
             else if (horn.isPlaying) horn.Stop();
+        }
+
+        void OpenTerminal(Terminal terminal)
+        {
+            activeTerminal = terminal;
+            terminalScreen ??= new TerminalScreen(transform, CloseTerminal);
+            lastEscape = -10f;
+            quitHintUntil = 0;
+            UnlockCursor();
+            terminalScreen.Open(terminal.Title);
+        }
+
+        void CloseTerminal()
+        {
+            terminalScreen.Close();
+            activeTerminal = null;
+            LockCursor();
         }
 
         void PlacePlayer(Vector3 position)
@@ -144,7 +177,7 @@ namespace KeepDriving
         void FixedUpdate()
         {
             if (WaitingForTerrain) return;
-            if (fieldReceiver?.IsOpen == true) return;
+            if (ModalOpen) return;
             Vector3 focus = driving ? car.position : player.transform.position;
             if (terrainStream && terrainStream.ShiftOriginIfNeeded(focus) && skidMarks != null)
                 foreach (var mark in skidMarks) mark.Clear();
@@ -201,7 +234,7 @@ namespace KeepDriving
 
         void LateUpdate()
         {
-            if (fieldReceiver?.IsOpen == true) return;
+            if (ModalOpen) return;
 
             Quaternion look = Quaternion.Euler(pitch, yaw, 0);
             Vector3 anchor = driving ? car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f)) : player.transform.position + Vector3.up * .65f;
@@ -333,6 +366,7 @@ namespace KeepDriving
 
         void OnDisable()
         {
+            if (terminalScreen?.IsOpen == true) CloseTerminal();
             if (fieldReceiver?.IsOpen != true) return;
             fieldReceiver.Close();
             LockCursor();
@@ -341,6 +375,7 @@ namespace KeepDriving
         void OnDestroy()
         {
             fieldReceiver?.Dispose();
+            terminalScreen?.Dispose();
             minimap.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
         }
@@ -353,7 +388,7 @@ namespace KeepDriving
                 return;
             }
 
-            if (fieldReceiver?.IsOpen == true)
+            if (ModalOpen)
             {
                 return;
             }
@@ -379,7 +414,11 @@ namespace KeepDriving
                 GUI.Box(new Rect(16, driving ? 142 : 104, 200, 30), $"Tile ({tile.x}, {tile.y})");
             }
 
-            if (!driving && NearCar())
+            if (!driving && Terminal.FindNearby(position))
+            {
+                GUI.Box(new Rect(Screen.width / 2 - 105, Screen.height / 2 + 40, 210, 32), "Press E to Interact");
+            }
+            else if (!driving && NearCar())
             {
                 GUI.Box(new Rect(Screen.width / 2 - 90, Screen.height / 2 + 40, 180, 32), "Press E to enter car");
             }
@@ -391,5 +430,6 @@ namespace KeepDriving
         }
 
         bool WaitingForTerrain => terrainStream != null && terrainStream.HasSource && !terrainStream.InitialWindowReady;
+        bool ModalOpen => fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
     }
 }

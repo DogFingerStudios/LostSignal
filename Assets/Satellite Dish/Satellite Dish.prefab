@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 366679367233746273}
   - component: {fileID: 1632660968447689461}
+  - component: {fileID: 7142313529439868107}
   m_Layer: 0
   m_Name: Satellite Dish
   m_TagString: Untagged
@@ -46,7 +47,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5ba64fef3e0ca8b46a94c66e6e5d0497, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  _nodeName: 
+  _name: 
+  _range: 0
+--- !u!114 &7142313529439868107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 956447122761477440}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0b3f451a7b1d4fc4aac62f93b37cf2d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.Terminal
+  terminalTitle: Terminal
+  interactionRange: 2.5
+  interactionPoint: {fileID: 0}
 --- !u!1001 &7692076069141491089
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -168,8 +185,31 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 1000014280859804, guid: 40ac3af1a5cdec948893235580e5aba6, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 586750263131575260}
   m_SourcePrefab: {fileID: 100100000, guid: 40ac3af1a5cdec948893235580e5aba6, type: 3}
+--- !u!1 &8386901581350916061 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 1000014280859804, guid: 40ac3af1a5cdec948893235580e5aba6, type: 3}
+  m_PrefabInstance: {fileID: 8387900483686002497}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &586750263131575260
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8386901581350916061}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0b3f451a7b1d4fc4aac62f93b37cf2d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.Terminal
+  terminalTitle: Terminal
+  interactionRange: 2.5
+  interactionPoint: {fileID: 8388511691422707651}
 --- !u!4 &8388511691422707651 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 4000010082992258, guid: 40ac3af1a5cdec948893235580e5aba6, type: 3}

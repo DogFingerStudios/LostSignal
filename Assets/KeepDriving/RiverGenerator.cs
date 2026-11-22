@@ -14,18 +14,23 @@ namespace KeepDriving
         private readonly float _coverage;
         private readonly Vector2 _tileSize;
         private readonly float _lakeOffset;
+        private readonly float _riverOrigin;
+        private readonly float _dryRadius;
 
-        public RiverGenerator(int seed, float coverage, Vector2 tileSize)
+        public RiverGenerator(int seed, float coverage, Vector2 tileSize, float spawnClearingRadius)
         {
             _seed = seed;
             _coverage = Mathf.Clamp01(coverage / 100f);
             _tileSize = tileSize;
             _lakeOffset = Random01(0, 0, 1) * LakeSpacing;
+            _riverOrigin = tileSize.y * .5f + (Random01(0, 0, 9) - .5f) * RiverSpacing;
+            // Account for the bank blend and shoreline-grid interpolation around the clearing.
+            _dryRadius = spawnClearingRadius + BankWidth + tileSize.magnitude / Grid;
         }
 
         public Tile GenerateTile(Vector2Int key, CancellationToken token)
         {
-            if (_coverage == 0 || key == Vector2Int.zero) return null;
+            if (_coverage == 0) return null;
             var samples = new float[Grid + 1, Grid + 1];
             var levels = new float[Grid + 1];
             float closest = float.NegativeInfinity;
@@ -48,15 +53,15 @@ namespace KeepDriving
             return new Tile(samples, levels, _tileSize);
         }
 
-        // Positive distance means water. Coordinates are measured from the authored tile's southwest corner.
+        // Positive distance means water. Coordinates are measured from the starting tile's southwest corner.
         private float ShoreDistance(float x, float z)
         {
-            float dx = Mathf.Max(-x, x - _tileSize.x);
-            float dz = Mathf.Max(-z, z - _tileSize.y);
-            float protectedShore = Mathf.Max(dx, dz) - 30f;
+            float dx = x - _tileSize.x * .5f;
+            float dz = z - _tileSize.y * .5f;
+            float protectedShore = Mathf.Sqrt(dx * dx + dz * dz) - _dryRadius;
             if (_coverage >= 1f) return protectedShore;
 
-            float relativeZ = z - _tileSize.y * .5f;
+            float relativeZ = z - _riverOrigin;
             int lane = Mathf.FloorToInt(relativeZ / RiverSpacing);
             float lakePosition = (x - _lakeOffset) / LakeSpacing;
             int lake = Mathf.RoundToInt(lakePosition);
@@ -99,7 +104,7 @@ namespace KeepDriving
             float phase = Random01(lane, 0, 2) * (2f * Mathf.PI);
             float bend = 110f * Mathf.Sin(x / 335f + phase)
                 + 35f * Mathf.Sin(x / 126f - phase);
-            return _tileSize.y * .5f + (lane + .5f) * RiverSpacing + bend;
+            return _riverOrigin + (lane + .5f) * RiverSpacing + bend;
         }
 
         private float WaterLevel(float x)

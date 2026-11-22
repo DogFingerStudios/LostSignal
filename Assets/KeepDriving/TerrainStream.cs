@@ -21,6 +21,7 @@ namespace KeepDriving
         private GameObject[] treePrefabs = new GameObject[3];
 
         private const int WindowRadius = 2;
+        private const float SpawnClearingRadius = 24f;
         private const float PrefetchDistance = 125f;
         private const float OriginShiftDistance = 1600f;
         private static readonly ProfilerMarker GenerateMarker = new ProfilerMarker("TerrainStream.GenerateHeights");
@@ -29,11 +30,12 @@ namespace KeepDriving
         private Terrain _source;
         private TerrainCollider _sourceCollider;
         private TerrainData _sourceData;
+        private TerrainData _runtimeSourceData;
         private Vector3 _origin;
         private Vector3 _size;
         private Vector2 _noiseOffset;
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new Dictionary<Vector2Int, Terrain>();
-        private readonly Dictionary<Terrain, (RiverGenerator.Tile Layout, Mesh Mesh)> _waterTiles = new();
+        private readonly Dictionary<Terrain, (RiverGenerator.Tile Layout, Mesh Mesh, GameObject Surface)> _waterTiles = new();
         private readonly List<GameObject> _roots = new List<GameObject>();
         private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
         private float[,] _sourceHeights;
@@ -45,6 +47,7 @@ namespace KeepDriving
         private Vector2Int _pendingKey;
         private float _retryAfter;
         private Vector2Int _originTile;
+        private bool _sourceReady;
 
         private readonly struct TileContents
         {
@@ -81,7 +84,7 @@ namespace KeepDriving
                 if (prototypes.Count > 0)
                 {
                     _treePrototypes = prototypes.ToArray();
-                    _trees = new TreeGenerator(worldSeed, treeDensity, prototypes.Count, _size);
+                    _trees = new TreeGenerator(worldSeed, treeDensity, prototypes.Count, _size, SpawnClearingRadius);
                 }
             }
             if (waterCoverage > 0)
@@ -90,7 +93,7 @@ namespace KeepDriving
                 if (shader)
                 {
                     _waterMaterial = new Material(shader) { name = "Procedural River and Lake Water" };
-                    _rivers = new RiverGenerator(worldSeed, waterCoverage, new Vector2(_size.x, _size.z));
+                    _rivers = new RiverGenerator(worldSeed, waterCoverage, new Vector2(_size.x, _size.z), SpawnClearingRadius);
                 }
                 else
                 {
@@ -100,13 +103,21 @@ namespace KeepDriving
             int resolution = _sourceData.heightmapResolution;
             _sourceHeights = _sourceData.GetHeights(0, 0, resolution, resolution);
             _tiles.Add(Vector2Int.zero, _source);
+            _sourceReady = _rivers == null && _trees == null && _sourceData.treeInstanceCount == 0;
         }
 
         public bool HasSource => isActiveAndEnabled && _sourceData;
         public bool InitialWindowReady { get; private set; }
 
-        public Vector3 SpawnPosition => _origin + new Vector3(_size.x / 2,
-            _sourceData.GetInterpolatedHeight(.5f, .5f) + 1f, _size.z / 2) - TileOffset(_originTile);
+        public Vector3 SpawnPosition => GetSpawnPosition(0f, 1f);
+        public Vector3 VehicleSpawnPosition => GetSpawnPosition(5f, .75f);
+
+        private Vector3 GetSpawnPosition(float northOffset, float heightOffset)
+        {
+            float z = _size.z * .5f + northOffset;
+            float height = _sourceData.GetInterpolatedHeight(.5f, z / _size.z);
+            return _origin + new Vector3(_size.x * .5f, height + heightOffset, z) - TileOffset(_originTile);
+        }
 
         private Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * _size.x, 0, tile.y * _size.z);
 
@@ -175,12 +186,25 @@ namespace KeepDriving
                     Debug.LogException(completed.Exception);
                     _retryAfter = Time.unscaledTime + 1f;
                 }
+                else if (!completed.IsCanceled && !_sourceReady)
+                {
+                    InstallStartingTile(completed.Result);
+                    _sourceReady = true;
+                    return;
+                }
                 else if (!completed.IsCanceled && Contains(_pendingKey, min, max))
                 {
                     _tiles.Add(_pendingKey, CreateTile(_pendingKey, completed.Result));
                     RefreshNeighbors();
                     return;
                 }
+            }
+
+            if (!_sourceReady)
+            {
+                if (_pendingHeights == null && Time.unscaledTime >= _retryAfter)
+                    QueueTile(Vector2Int.zero);
+                return;
             }
 
             Vector2Int? next = null;
@@ -227,7 +251,12 @@ namespace KeepDriving
                 return;
             }
 
-            _pendingKey = requested;
+            QueueTile(requested);
+        }
+
+        private void QueueTile(Vector2Int key)
+        {
+            _pendingKey = key;
             float[,] sourceHeights = _sourceHeights;
             float amplitude = Mathf.Min(18f / _size.y, 1f);
             Vector2 noiseOffset = _noiseOffset;
@@ -237,10 +266,10 @@ namespace KeepDriving
             CancellationToken token = _shutdown.Token;
             _pendingHeights = Task.Run(() =>
             {
-                var water = rivers?.GenerateTile(requested, token);
-                var heights = GenerateHeights(requested, sourceHeights, amplitude, noiseOffset, water, heightScale, token);
+                var water = rivers?.GenerateTile(key, token);
+                var heights = GenerateHeights(key, sourceHeights, amplitude, noiseOffset, water, heightScale, token);
                 return new TileContents(heights, water, water?.BuildSurface(token),
-                    trees?.GenerateTile(requested, heights, water, token));
+                    trees?.GenerateTile(key, heights, water, token));
             }, token);
         }
 
@@ -280,6 +309,8 @@ namespace KeepDriving
             // The streamer and atmosphere share this GameObject with the authored tile.
             _source.enabled = loaded;
             _sourceCollider.enabled = loaded;
+            if (_waterTiles.TryGetValue(_source, out var water))
+                water.Surface.SetActive(loaded);
         }
 
         private void RefreshNeighbors()
@@ -313,6 +344,8 @@ namespace KeepDriving
             float amplitude, Vector2 noiseOffset, RiverGenerator.Tile water, float heightScale, CancellationToken token)
         {
             using var sample = GenerateMarker.Auto();
+            bool starting = key == Vector2Int.zero;
+            if (starting && water == null) return sourceHeights;
             int resolution = sourceHeights.GetLength(0);
             var heights = new float[resolution, resolution];
             bool nearSource = Mathf.Abs(key.x) <= 1 && Mathf.Abs(key.y) <= 1;
@@ -322,6 +355,11 @@ namespace KeepDriving
                 for (int x = 0; x < resolution; x++)
                 {
                     float u = x / (resolution - 1f), v = z / (resolution - 1f);
+                    if (starting)
+                    {
+                        heights[z, x] = Mathf.Clamp01(water.ShapeGround(u, v, sourceHeights[z, x] * heightScale) / heightScale);
+                        continue;
+                    }
                     float worldX = key.x + u;
                     float worldZ = key.y + v;
                     float edgeX = Mathf.Clamp01(worldX);
@@ -398,6 +436,53 @@ namespace KeepDriving
             return terrain;
         }
 
+        private void InstallStartingTile(TileContents contents)
+        {
+            using var sample = InstallMarker.Auto();
+            // Sculpt and plant on a runtime copy to preserve the editor's painted terrain asset.
+            _runtimeSourceData = Instantiate(_sourceData);
+            _runtimeSourceData.name = _sourceData.name + " (Runtime)";
+            if (contents.Water != null)
+                _runtimeSourceData.SetHeights(0, 0, contents.Heights);
+            ApplyStartingTrees(contents);
+            _source.terrainData = _runtimeSourceData;
+            _sourceCollider.terrainData = _runtimeSourceData;
+            if (contents.Surface is { Length: > 0 })
+                AttachWaterSurface(_source, contents);
+            RefreshNeighbors();
+        }
+
+        private void ApplyStartingTrees(TileContents contents)
+        {
+            var authored = _sourceData.treeInstances;
+            int generatedCount = contents.Trees?.Length ?? 0;
+            if (authored.Length == 0 && generatedCount == 0) return;
+
+            var instances = new List<TreeInstance>(authored.Length + generatedCount);
+            foreach (var tree in authored)
+            {
+                float u = tree.position.x, v = tree.position.z;
+                if (!TreeGenerator.InSpawnClearing(u, v, _size, SpawnClearingRadius * SpawnClearingRadius)
+                    && contents.Water?.ContainsWater(u, v) != true)
+                    instances.Add(tree);
+            }
+
+            if (generatedCount > 0)
+            {
+                var prototypes = new List<TreePrototype>(_sourceData.treePrototypes);
+                int offset = prototypes.Count;
+                prototypes.AddRange(_treePrototypes);
+                _runtimeSourceData.treePrototypes = prototypes.ToArray();
+                foreach (var generated in contents.Trees)
+                {
+                    var tree = generated;
+                    tree.prototypeIndex += offset;
+                    instances.Add(tree);
+                }
+            }
+            _runtimeSourceData.SetTreeInstances(instances.ToArray(), true);
+        }
+
         private void AttachWaterSurface(Terrain terrain, TileContents contents)
         {
             var mesh = new Mesh { name = "Water Surface" };
@@ -414,12 +499,19 @@ namespace KeepDriving
             renderer.sharedMaterial = _waterMaterial;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-            _waterTiles.Add(terrain, (contents.Water, mesh));
+            _waterTiles.Add(terrain, (contents.Water, mesh, water));
+        }
+
+        private void DestroyWater(Terrain tile)
+        {
+            if (!_waterTiles.Remove(tile, out var water)) return;
+            Object.Destroy(water.Mesh);
+            if (water.Surface) Object.Destroy(water.Surface);
         }
 
         private void DestroyTile(Terrain tile)
         {
-            if (_waterTiles.Remove(tile, out var water)) Object.Destroy(water.Mesh);
+            DestroyWater(tile);
             if (!tile)
             {
                 return;
@@ -437,7 +529,17 @@ namespace KeepDriving
             if (_source)
             {
                 _source.SetNeighbors(null, null, null, null);
-                if (_sourceCollider && gameObject.scene.isLoaded) SetSourceTileLoaded(true);
+                if (_runtimeSourceData) _source.terrainData = _sourceData;
+                if (_sourceCollider)
+                {
+                    if (_runtimeSourceData) _sourceCollider.terrainData = _sourceData;
+                    if (gameObject.scene.isLoaded) SetSourceTileLoaded(true);
+                }
+            }
+            if (_runtimeSourceData)
+            {
+                DestroyWater(_source);
+                Object.Destroy(_runtimeSourceData);
             }
             foreach (var entry in _tiles)
             {

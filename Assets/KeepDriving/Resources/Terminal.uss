@@ -1,0 +1,10 @@
+#terminal-command {
+    --unity-cursor-color: #8fed99;
+    --unity-selection-color: #427b52;
+}
+
+#terminal-command .unity-text-field__input {
+    background-color: transparent;
+    border-width: 0;
+    color: #cdffd3;
+}
