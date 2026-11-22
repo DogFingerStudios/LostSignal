@@ -44993,6 +44993,7 @@ GameObject:
   - component: {fileID: 919439682}
   - component: {fileID: 919439683}
   - component: {fileID: 919439684}
+  - component: {fileID: 919439685}
   m_Layer: 0
   m_Name: Terrain (Paintable Rolling Hills)
   m_TagString: Untagged
@@ -45087,6 +45088,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3a447fa8ed938484b8737820067ef0a4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Atmosphere
+--- !u!114 &919439685
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 919439676}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b0ebfce91a83b4c4ea8a2ef431796efa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.TerrainStream
+  worldSeed: 271828
+  waterCoverage: 75
+  treeDensity: 50
+  treePrefabs:
+  - {fileID: 1743353957770956, guid: 82a6bf9ca38d9d443997ccec084ba669, type: 3}
+  - {fileID: 1214657917099862, guid: 78f6b68ad931a824c920d7b953612370, type: 3}
+  - {fileID: 1364922359172550, guid: 1aaf3ef80841d9c4990a27fee328eb1c, type: 3}
+  - {fileID: 1743353957770956, guid: 4663d5cca4ed98548946e758cd5979e2, type: 3}
 --- !u!1001 &919647729
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -48509,6 +48530,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cc46403d60cc7cd478abc18c49dd6dd9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.PrototypeController
+  terrainStream: {fileID: 919439685}
   player: {fileID: 2055955582}
   playerVisual: {fileID: 2055955581}
   car: {fileID: 245214888}

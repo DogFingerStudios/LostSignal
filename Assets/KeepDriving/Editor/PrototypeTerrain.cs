@@ -15,10 +15,14 @@ namespace KeepDriving.Editor
         static float Hill(float x, float z, float cx, float cz, float sx, float sz, float height)
             => height * Mathf.Exp(-((x-cx)*(x-cx)/(sx*sx) + (z-cz)*(z-cz)/(sz*sz)));
 
-        public static void Configure(GameObject ground)
+        public static TerrainStream Configure(GameObject ground)
         {
             // Preserve future hand sculpting/painting if this setup is run again.
-            if (ground.GetComponent<Terrain>() && ground.GetComponent<Terrain>().terrainData) return;
+            var terrain = ground.GetComponent<Terrain>();
+            if (terrain && terrain.terrainData)
+            {
+                return AttachStream(ground, terrain.terrainData);
+            }
             const int size = 513;
             const string path = "Assets/KeepDriving/PaintableTerrain.asset";
             var data = AssetDatabase.LoadAssetAtPath<TerrainData>(path);
@@ -39,13 +43,14 @@ namespace KeepDriving.Editor
                 data.SetAlphamaps(0, 0, paint);
                 AssetDatabase.CreateAsset(data, path);
             }
-            foreach (var collider in ground.GetComponents<Collider>()) Object.DestroyImmediate(collider);
+            foreach (var collider in ground.GetComponents<Collider>())
+                if (collider is not TerrainCollider) Object.DestroyImmediate(collider);
             if (ground.GetComponent<MeshRenderer>()) Object.DestroyImmediate(ground.GetComponent<MeshRenderer>());
             if (ground.GetComponent<MeshFilter>()) Object.DestroyImmediate(ground.GetComponent<MeshFilter>());
             ground.name = "Terrain (Paintable Rolling Hills)";
             ground.transform.SetPositionAndRotation(new Vector3(-250, 0, -250), Quaternion.identity);
             ground.transform.localScale = Vector3.one;
-            var terrain = ground.GetComponent<Terrain>() ?? ground.AddComponent<Terrain>();
+            terrain ??= ground.AddComponent<Terrain>();
             terrain.terrainData = data;
             terrain.heightmapPixelError = 3;
             terrain.drawInstanced = true;
@@ -59,8 +64,15 @@ namespace KeepDriving.Editor
                 AssetDatabase.CreateAsset(material, materialPath);
             }
             terrain.materialTemplate = material;
-            ground.AddComponent<TerrainCollider>().terrainData = data;
             terrain.Flush();
+            return AttachStream(ground, data);
+        }
+
+        static TerrainStream AttachStream(GameObject ground, TerrainData data)
+        {
+            var terrainCollider = ground.GetComponent<TerrainCollider>() ?? ground.AddComponent<TerrainCollider>();
+            terrainCollider.terrainData = data;
+            return ground.GetComponent<TerrainStream>() ?? ground.AddComponent<TerrainStream>();
         }
 
         static TerrainLayer Layer(string name, Color color)
@@ -88,8 +100,9 @@ namespace KeepDriving.Editor
             EditorSceneManager.OpenScene("Assets/Scenes/KeepDriving.unity");
             var ground = GameObject.Find("Terrain (Paintable Rolling Hills)") ?? GameObject.Find("Flat Ground (500m x 500m)") ?? GameObject.Find("Rolling Terrain (500m x 500m)");
             if (!ground) throw new System.Exception("Prototype ground missing");
-            Configure(ground);
+            var terrainStream = Configure(ground);
             var game = Object.FindFirstObjectByType<PrototypeController>();
+            game.terrainStream = terrainStream;
             game.car.isKinematic = true;
             game.car.interpolation = RigidbodyInterpolation.Interpolate;
             game.car.constraints = RigidbodyConstraints.None;

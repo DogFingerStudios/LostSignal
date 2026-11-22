@@ -5,6 +5,8 @@ namespace KeepDriving
 {
     public sealed class PrototypeController : MonoBehaviour
     {
+        public TerrainStream terrainStream;
+
         public CharacterController player;
         public Renderer playerVisual;
         public Rigidbody car;
@@ -21,7 +23,6 @@ namespace KeepDriving
         Renderer seatedDriver, seatedTorso;
         TrailRenderer[] skidMarks;
         Material skidMaterial;
-        TerrainStream terrainStream;
         FieldReceiverUI fieldReceiver;
         readonly Minimap minimap = new Minimap();
         bool skidding;
@@ -31,8 +32,7 @@ namespace KeepDriving
         {
             car.isKinematic = true;
             car.interpolation = RigidbodyInterpolation.Interpolate;
-            terrainStream = new TerrainStream(gameObject.scene, player.transform.position);
-            if (terrainStream.HasSource)
+            if (terrainStream && terrainStream.HasSource)
             {
                 Vector3 spawn = terrainStream.SpawnPosition;
                 var carCollider = car.GetComponent<Collider>();
@@ -42,7 +42,6 @@ namespace KeepDriving
                     && spawn.z >= clearance.min.z && spawn.z <= clearance.max.z)
                     car.position += Vector3.forward * 5f;
                 PlacePlayer(spawn);
-                terrainStream.Update(spawn);
             }
             LockCursor(); UpdateVisibility();
         }
@@ -58,6 +57,8 @@ namespace KeepDriving
 
         void Update()
         {
+            if (terrainStream) terrainStream.Pump(driving ? car.position : player.transform.position);
+            if (WaitingForTerrain) return;
             var keys = Keyboard.current;
             if (fieldReceiver?.IsOpen == true)
             {
@@ -115,8 +116,9 @@ namespace KeepDriving
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
                 player.Move((movement * (ShiftHeld ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
-                if (player.transform.position.y < -20 && terrainStream.HasSource)
+                if (player.transform.position.y < -20 && terrainStream && terrainStream.HasSource)
                 {
+                    terrainStream.RestoreSourceTile();
                     PlacePlayer(terrainStream.SpawnPosition);
                     verticalSpeed = 0;
                 }
@@ -141,9 +143,10 @@ namespace KeepDriving
 
         void FixedUpdate()
         {
+            if (WaitingForTerrain) return;
             if (fieldReceiver?.IsOpen == true) return;
             Vector3 focus = driving ? car.position : player.transform.position;
-            if (terrainStream?.Update(focus) == true && skidMarks != null)
+            if (terrainStream && terrainStream.ShiftOriginIfNeeded(focus) && skidMarks != null)
                 foreach (var mark in skidMarks) mark.Clear();
 
             Vector2 input = driving ? ReadMovement() : Vector2.zero;
@@ -199,6 +202,7 @@ namespace KeepDriving
         void LateUpdate()
         {
             if (fieldReceiver?.IsOpen == true) return;
+
             Quaternion look = Quaternion.Euler(pitch, yaw, 0);
             Vector3 anchor = driving ? car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f)) : player.transform.position + Vector3.up * .65f;
             Vector3 position = anchor;
@@ -212,7 +216,11 @@ namespace KeepDriving
                 for (int i = 0; i < count; i++)
                 {
                     var hit = cameraHits[i];
-                    if (hit.collider.transform.IsChildOf(player.transform) || hit.rigidbody == car) continue;
+                    if (hit.collider.transform.IsChildOf(player.transform) || hit.rigidbody == car)
+                    {
+                        continue;
+                    }
+
                     distance = Mathf.Min(distance, Mathf.Max(.2f, hit.distance - .1f));
                 }
                 position = pivot - look * Vector3.forward * distance;
@@ -269,18 +277,21 @@ namespace KeepDriving
                 return;
             }
         }
+
         void UpdateVisibility()
         {
             playerVisual.enabled = !driving && thirdPerson;
             if (seatedDriver) seatedDriver.enabled = driving && thirdPerson;
             if (seatedTorso) seatedTorso.enabled = driving && !thirdPerson;
         }
+
         void EnsureDriver()
         {
             if (seatedDriver) return;
             seatedDriver = DriverMesh("Seated Driver Capsule", new Vector3(-.4f, .65f, .15f), new Vector3(.7f, .65f, .7f));
             seatedTorso = DriverMesh("First Person Torso", new Vector3(-.4f, .45f, .15f), new Vector3(.7f, .3f, .7f));
         }
+
         Renderer DriverMesh(string name, Vector3 position, Vector3 scale)
         {
             var visual = new GameObject(name);
@@ -292,6 +303,7 @@ namespace KeepDriving
             renderer.sharedMaterial = playerVisual.sharedMaterial;
             return renderer;
         }
+
         void UpdateSkidMarks()
         {
             if (skidMarks == null)
@@ -318,6 +330,7 @@ namespace KeepDriving
                 skidMarks[i].emitting = skidding && contact;
             }
         }
+
         void OnDisable()
         {
             if (fieldReceiver?.IsOpen != true) return;
@@ -329,23 +342,54 @@ namespace KeepDriving
         {
             fieldReceiver?.Dispose();
             minimap.Dispose();
-            terrainStream?.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
         }
+
         void OnGUI()
         {
-            if (fieldReceiver?.IsOpen == true) return;
+            if (WaitingForTerrain)
+            {
+                GUI.Box(new Rect(Screen.width / 2 - 100, Screen.height / 2 - 16, 200, 32), "Loading terrain…");
+                return;
+            }
+
+            if (fieldReceiver?.IsOpen == true)
+            {
+                return;
+            }
+
             GUI.Box(new Rect(16, 16, 650, 80), driving
                 ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver"
                 : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver");
-            if (driving) GUI.Box(new Rect(16, 104, 200, 30), $"{carVelocity.magnitude * 3.6f:0} km/h" + (skidding ? "   SKIDDING" : ""));
+
+            if (driving)
+            {
+                GUI.Box(new Rect(16, 104, 200, 30), $"{carVelocity.magnitude * 3.6f:0} km/h" + (skidding ? "   SKIDDING" : ""));
+            }
+            
             Vector3 position = driving ? car.transform.position : player.transform.position;
+
             if (Event.current.type == EventType.Repaint)
-                minimap.Draw(gameObject.scene, position, driving ? car.rotation.eulerAngles.y : yaw);
-            if (terrainStream?.GetTile(position) is Vector2Int tile)
+            {
+                minimap.Draw(gameObject.scene, position, driving ? car.rotation.eulerAngles.y : yaw, terrainStream);
+            }
+            
+            if (terrainStream && terrainStream.GetTile(position) is Vector2Int tile)
+            {
                 GUI.Box(new Rect(16, driving ? 142 : 104, 200, 30), $"Tile ({tile.x}, {tile.y})");
-            if (!driving && NearCar()) GUI.Box(new Rect(Screen.width / 2 - 90, Screen.height / 2 + 40, 180, 32), "Press E to enter car");
-            if (Time.unscaledTime < quitHintUntil) GUI.Box(new Rect(Screen.width / 2 - 150, 110, 300, 32), "Press Esc again quickly to quit");
+            }
+
+            if (!driving && NearCar())
+            {
+                GUI.Box(new Rect(Screen.width / 2 - 90, Screen.height / 2 + 40, 180, 32), "Press E to enter car");
+            }
+
+            if (Time.unscaledTime < quitHintUntil)
+            {
+                GUI.Box(new Rect(Screen.width / 2 - 150, 110, 300, 32), "Press Esc again quickly to quit");
+            }
         }
+
+        bool WaitingForTerrain => terrainStream != null && terrainStream.HasSource && !terrainStream.InitialWindowReady;
     }
 }

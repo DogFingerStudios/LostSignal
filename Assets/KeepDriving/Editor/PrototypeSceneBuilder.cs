@@ -21,7 +21,7 @@ namespace KeepDriving.Editor
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var ground = new GameObject("Terrain (Paintable Rolling Hills)");
-            PrototypeTerrain.Configure(ground);
+            var terrainStream = PrototypeTerrain.Configure(ground);
             var sun = new GameObject("Sun").AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.intensity = 2;
@@ -67,6 +67,7 @@ namespace KeepDriving.Editor
             camera.transform.position = player.transform.position + Vector3.up * .65f;
             camera.gameObject.AddComponent<AudioListener>();
             var game = new GameObject("Prototype Controller").AddComponent<PrototypeController>();
+            game.terrainStream = terrainStream;
             game.player = controller; game.playerVisual = player.GetComponent<Renderer>(); game.car = rb; game.view = camera; game.horn = audio;
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };

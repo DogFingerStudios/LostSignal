@@ -16,6 +16,7 @@ namespace KeepDriving
         static readonly Color Lowland = new(.13f, .22f, .19f);
         static readonly Color Highland = new(.43f, .52f, .40f);
         static readonly Color Unmapped = new(.08f, .13f, .12f);
+        static readonly Color Water = new(.13f, .42f, .55f);
 
         readonly Color32[] pixels = new Color32[Resolution * Resolution];
         Texture2D relief, arrow, diamond;
@@ -24,7 +25,7 @@ namespace KeepDriving
         Vector2 center;
         float nextNodeScan, nextReliefRefresh;
 
-        public void Draw(Scene scene, Vector3 position, float heading)
+        public void Draw(Scene scene, Vector3 position, float heading, TerrainStream terrainStream)
         {
             if (!relief) Initialize();
             if (Time.unscaledTime >= nextNodeScan)
@@ -37,7 +38,7 @@ namespace KeepDriving
             if (newCenter != center || Time.unscaledTime >= nextReliefRefresh)
             {
                 center = newCenter;
-                UpdateRelief(scene);
+                UpdateRelief(scene, terrainStream);
                 nextReliefRefresh = Time.unscaledTime + 1f;
             }
 
@@ -108,7 +109,7 @@ namespace KeepDriving
             right = new GUIStyle(left) { alignment = TextAnchor.MiddleRight };
         }
 
-        void UpdateRelief(Scene scene)
+        void UpdateRelief(Scene scene, TerrainStream terrainStream)
         {
             System.Array.Fill(pixels, (Color32)Unmapped);
             float west = center.x - Range * .5f;
@@ -130,6 +131,11 @@ namespace KeepDriving
                 {
                     float u = (west + (x + .5f) * step - origin.x) / size.x;
                     float v = (south + (z + .5f) * step - origin.z) / size.z;
+                    if (terrainStream && terrainStream.HasWaterAt(terrain, u, v))
+                    {
+                        pixels[z * Resolution + x] = Water;
+                        continue;
+                    }
                     float height = origin.y + data.GetInterpolatedHeight(u, v);
                     Color color = Color.Lerp(Lowland, Highland, Mathf.InverseLerp(-3, 22, height));
                     float band = Mathf.Repeat(height, 3f);

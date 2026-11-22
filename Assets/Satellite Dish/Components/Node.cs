@@ -20,7 +20,7 @@ public class Node : MonoBehaviour
     Antenna _antenna;
     TimingOscillator _timingOscillator;
     NodeController _nodeController;
-    RadioTransmitter _transmitter;
+    //RadioTransmitter _transmitter
 
     private float _timer;
     private const float Interval = 0.5f;
@@ -45,21 +45,21 @@ public class Node : MonoBehaviour
 
     private void EmitSignal()
     {
-        float powerDbm = 10f * Mathf.Log10(
-            _transmitter.CurrentPowerWatts * 1000f);
+        //float powerDbm = 10f * Mathf.Log10(
+        //    _transmitter.CurrentPowerWatts * 1000f);
 
-        foreach (RFCable cable in _cables)
-        {
-            powerDbm -= cable.SignalLossDb;
-        }
+        //foreach (RFCable cable in _cables)
+        //{
+        //    powerDbm -= cable.SignalLossDb;
+        //}
 
 
-        NodeSignal signal = new NodeSignal { 
-            Node = this,
-            FrequencyHz = _transmitter.FrequencyHz,
-            PowerDbm = powerDbm,
-            TransmitTimeMs = 0
-        };
-        Atmosphere.Instance.Broadcast(signal);
+        //NodeSignal signal = new NodeSignal { 
+        //    Node = this,
+        //    FrequencyHz = _transmitter.FrequencyHz,
+        //    PowerDbm = powerDbm,
+        //    TransmitTimeMs = 0
+        //};
+        //Atmosphere.Instance.Broadcast(signal);
     }
 }
