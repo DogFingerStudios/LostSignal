@@ -92,7 +92,7 @@ namespace KeepDriving
             var frame = screen.style;
             frame.borderTopWidth = frame.borderBottomWidth = frame.borderLeftWidth = frame.borderRightWidth = 1;
             frame.borderTopColor = frame.borderBottomColor = frame.borderLeftColor = frame.borderRightColor = Edge;
-            _font = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Liberation Mono", "Courier New" }, 16);
+            _font = CreateTerminalFont();
             if (_font) screen.style.unityFontDefinition = FontDefinition.FromFont(_font);
             _overlay.Add(screen);
 
@@ -202,6 +202,20 @@ namespace KeepDriving
             {
                 if (IsOpen && line.parent == _transcript.contentContainer) _transcript.ScrollTo(line);
             });
+        }
+
+        private static Font CreateTerminalFont()
+        {
+            var installedFonts = new HashSet<string>(Font.GetOSInstalledFontNames(), StringComparer.OrdinalIgnoreCase);
+            // TextCore resolves the font by family name, so pass a single installed family.
+            foreach (string family in new[] { "Consolas", "Menlo", "Monaco", "Liberation Mono", "Courier New" })
+            {
+                if (!installedFonts.Contains(family)) continue;
+                var font = Font.CreateDynamicFontFromOSFont(family, 16);
+                if (font) return font;
+            }
+
+            return null;
         }
 
         private static Label MakeLabel(string text, Color color, int fontSize)
