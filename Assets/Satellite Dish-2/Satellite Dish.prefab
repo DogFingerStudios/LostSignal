@@ -10,7 +10,6 @@ GameObject:
   m_Component:
   - component: {fileID: 366679367233746273}
   - component: {fileID: 1632660968447689461}
-  - component: {fileID: 7142313529439868107}
   m_Layer: 0
   m_Name: Satellite Dish
   m_TagString: Untagged
@@ -49,21 +48,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   _name: 
   _range: 0
---- !u!114 &7142313529439868107
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 956447122761477440}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0b3f451a7b1d4fc4aac62f93b37cf2d9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.Terminal
-  terminalTitle: Terminal
-  interactionRange: 2.5
-  interactionPoint: {fileID: 0}
 --- !u!1001 &7692076069141491089
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -207,7 +191,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b3f451a7b1d4fc4aac62f93b37cf2d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.Terminal
-  terminalTitle: Terminal
   interactionRange: 2.5
   interactionPoint: {fileID: 8388511691422707651}
 --- !u!4 &8388511691422707651 stripped

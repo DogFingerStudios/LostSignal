@@ -7,8 +7,8 @@ using static UnityEngine.Rendering.DebugUI;
 public class Node : MonoBehaviour
 {
     [SerializeField] 
-    private string _name;
-    public string Name => _name;
+    private string _nodeName;
+    public string NodeName => _nodeName;
 
     [SerializeField]
     private float _range;
