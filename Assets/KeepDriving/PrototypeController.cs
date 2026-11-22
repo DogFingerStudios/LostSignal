@@ -407,6 +407,13 @@ namespace KeepDriving
             if (Event.current.type == EventType.Repaint)
             {
                 minimap.Draw(gameObject.scene, position, driving ? car.rotation.eulerAngles.y : yaw, terrainStream);
+                if (!driving)
+                {
+                    const float radius = 2.5f;
+                    var dot = new Rect(Screen.width * .5f - radius, Screen.height * .5f - radius,
+                        radius * 2, radius * 2);
+                    GUI.DrawTexture(dot, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, Color.white, 0f, radius);
+                }
             }
             
             if (terrainStream && terrainStream.GetTile(position) is Vector2Int tile)
