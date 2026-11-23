@@ -364,6 +364,7 @@ namespace KeepDriving
                 float height = terrain.terrainData.GetInterpolatedHeight(x / TileSize, z / TileSize);
                 Vector3 position = terrain.GetPosition() + new Vector3(x, height, z);
                 Node dish = Instantiate(satelliteDish, position, Quaternion.Euler(0, point.Heading, 0), _sitesRoot.transform);
+                Console.WriteLine($"Spawned map site {point.Name} at {position} with heading {point.Heading}");
                 dish.NodeName = point.Name;
                 dish.name = point.Name;
                 _dishes.Add(point.Id, dish);
