@@ -8,7 +8,11 @@ public class Node : MonoBehaviour
 {
     [SerializeField] 
     private string _nodeName;
-    public string NodeName => _nodeName;
+    public string NodeName
+    {
+        get => _nodeName;
+        set => _nodeName = value;
+    }
 
     [SerializeField]
     private float _range;

@@ -1,0 +1,18 @@
+{
+"type": "FeatureCollection",
+"name": "sites",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32631" } },
+"xy_coordinate_resolution": 1e-08,
+"features": [
+{ "type": "Feature", "properties": { "id": "{b764baef-e3b4-49e5-9bb5-cdf831141e8b}", "name": null, "site_type": null, "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 90352.56410256, 188004.80769231 ] } },
+{ "type": "Feature", "properties": { "id": "{c6bbf8a8-40e3-4fec-96e3-2537267c9355}", "name": "HC-10091", "site_type": "Horizon Chain node", "heading_deg": 23.0, "notes": "no notes" }, "geometry": { "type": "Point", "coordinates": [ 25647.43589744, 166107.37179487 ] } },
+{ "type": "Feature", "properties": { "id": "{b4f0ea4d-9e62-426f-9193-51cc2bf386e2}", "name": "HC-1001", "site_type": "Horizon Chain node", "heading_deg": 90.0, "notes": "no more notesL" }, "geometry": { "type": "Point", "coordinates": [ 66935.09615385, 107918.85198135 ] } },
+{ "type": "Feature", "properties": { "id": "{c08a4a0f-b131-4b5d-b8f6-ac8dcb73ac91}", "name": "HC-1002", "site_type": "Horizon Chain node", "heading_deg": 90.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 84771.63461538, 108591.92890443 ] } },
+{ "type": "Feature", "properties": { "id": "{84d8ec01-d31a-4738-837a-05c883e7e130}", "name": "HC-1004", "site_type": "Horizon Chain node", "heading_deg": 90.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 81574.51923077, 93784.23659674 ] } },
+{ "type": "Feature", "properties": { "id": "{9f4a6687-8044-4940-8230-4f395fd8e3dd}", "name": "HC-1003", "site_type": "Horizon Chain node", "heading_deg": 180.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 68561.69871795, 95158.43531469 ] } },
+{ "type": "Feature", "properties": { "id": "{602833de-0838-4e9b-8aa5-91063cb60585}", "name": "1111", "site_type": "Horizon Chain node", "heading_deg": 0.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 72931.73243857, 102773.20227516 ] } },
+{ "type": "Feature", "properties": { "id": "{1d0b4d67-f48f-45a1-93fa-cf62a3c21a5e}", "name": "2222", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 73042.15912126, 102773.20227516 ] } },
+{ "type": "Feature", "properties": { "id": "{19c39843-ad3b-4dfd-9728-6d712f356b20}", "name": "33333", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 72926.47402511, 102646.12394983 ] } },
+{ "type": "Feature", "properties": { "id": "{32cb1c85-3a93-44c0-b8f1-d3eb69adf899}", "name": "4444", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 73050.9231437, 102642.61834086 ] } }
+]
+}

@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 366679367233746273}
   - component: {fileID: 1632660968447689461}
   m_Layer: 0
-  m_Name: Satellite Dish
+  m_Name: SatelliteDish
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

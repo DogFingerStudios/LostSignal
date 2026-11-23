@@ -27,6 +27,7 @@ namespace KeepDriving
         TerminalScreen terminalScreen;
         Terminal activeTerminal;
         readonly Minimap minimap = new Minimap();
+        readonly WorldMap worldMap = new WorldMap();
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
@@ -37,6 +38,9 @@ namespace KeepDriving
             if (terrainStream && terrainStream.HasSource)
             {
                 car.position = terrainStream.VehicleSpawnPosition;
+                yaw = terrainStream.SpawnHeading;
+                car.rotation = Quaternion.Euler(0, yaw, 0);
+                player.transform.rotation = car.rotation;
                 PlacePlayer(terrainStream.SpawnPosition);
             }
             LockCursor(); UpdateVisibility();
@@ -75,6 +79,15 @@ namespace KeepDriving
                 }
                 return;
             }
+            if (worldMap.IsOpen)
+            {
+                if (keys != null && (keys.mKey.wasPressedThisFrame || keys.escapeKey.wasPressedThisFrame))
+                {
+                    worldMap.Close();
+                    LockCursor();
+                }
+                return;
+            }
             if (keys != null && keys.iKey.wasPressedThisFrame)
             {
                 fieldReceiver ??= new FieldReceiverUI(transform);
@@ -85,6 +98,14 @@ namespace KeepDriving
                 UnlockCursor();
                 return;
             }
+            if (keys?.mKey.wasPressedThisFrame == true && terrainStream && terrainStream.HasSource)
+            {
+                worldMap.Open(terrainStream);
+                if (horn.isPlaying) horn.Stop();
+                UnlockCursor();
+                return;
+            }
+
             var mouse = Mouse.current;
             if (keys == null) return;
             if (keys.escapeKey.wasPressedThisFrame)
@@ -132,7 +153,7 @@ namespace KeepDriving
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
                 player.Move((movement * (ShiftHeld ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
-                if (player.transform.position.y < -20 && terrainStream && terrainStream.HasSource)
+                if (terrainStream && terrainStream.HasSource && player.transform.position.y < terrainStream.RecoveryHeight)
                 {
                     terrainStream.RestoreSourceTile();
                     PlacePlayer(terrainStream.SpawnPosition);
@@ -377,6 +398,7 @@ namespace KeepDriving
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
             minimap.Dispose();
+            worldMap.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
         }
 
@@ -388,14 +410,21 @@ namespace KeepDriving
                 return;
             }
 
+            if (worldMap.IsOpen)
+            {
+                if (Event.current.type == EventType.Repaint)
+                    worldMap.Draw(terrainStream, driving ? car.position : player.transform.position);
+                return;
+            }
+
             if (ModalOpen)
             {
                 return;
             }
 
             GUI.Box(new Rect(16, 16, 650, 80), driving
-                ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver"
-                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver");
+                ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   M world map"
+                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   M world map");
 
             if (driving)
             {
@@ -437,6 +466,6 @@ namespace KeepDriving
         }
 
         bool WaitingForTerrain => terrainStream != null && terrainStream.HasSource && !terrainStream.InitialWindowReady;
-        bool ModalOpen => fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
+        bool ModalOpen => worldMap.IsOpen || fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
     }
 }

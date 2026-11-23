@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -16,11 +17,11 @@ namespace KeepDriving
         static readonly Color Lowland = new(.13f, .22f, .19f);
         static readonly Color Highland = new(.43f, .52f, .40f);
         static readonly Color Unmapped = new(.08f, .13f, .12f);
-        static readonly Color Water = new(.13f, .42f, .55f);
 
         readonly Color32[] pixels = new Color32[Resolution * Resolution];
         Texture2D relief, arrow, diamond;
         GUIStyle left, right;
+        readonly List<Vector3> mapSites = new();
         Node[] nodes = System.Array.Empty<Node>();
         Vector2 center;
         float nextNodeScan, nextReliefRefresh;
@@ -38,7 +39,7 @@ namespace KeepDriving
             if (newCenter != center || Time.unscaledTime >= nextReliefRefresh)
             {
                 center = newCenter;
-                UpdateRelief(scene, terrainStream);
+                UpdateRelief(scene);
                 nextReliefRefresh = Time.unscaledTime + 1f;
             }
 
@@ -51,7 +52,7 @@ namespace KeepDriving
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "N ↑", right);
             GUI.DrawTexture(map, relief);
             DrawGrid(map);
-            DrawNodes(scene, map);
+            DrawNodes(scene, map, terrainStream);
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
 
             DrawIcon(diamond, new Vector2(map.x + 5, map.yMax + 13), 9, 0, Amber);
@@ -70,23 +71,36 @@ namespace KeepDriving
             }
         }
 
-        void DrawNodes(Scene scene, Rect map)
+        void DrawNodes(Scene scene, Rect map, TerrainStream terrainStream)
         {
+            if (terrainStream)
+            {
+                terrainStream.CollectMapSitePositions(mapSites);
+                foreach (var position in mapSites)
+                    DrawNode(position, map);
+            }
+
             foreach (Node node in nodes)
             {
                 if (!node || !node.gameObject.activeInHierarchy || node.gameObject.scene != scene) continue;
-                Vector2 delta = Project(node.transform.position, map) - map.center;
-                float limit = map.width * .5f - 8;
-                float edge = Mathf.Max(Mathf.Abs(delta.x), Mathf.Abs(delta.y));
-                if (edge > limit)
-                {
-                    float angle = Mathf.Atan2(delta.x, -delta.y) * Mathf.Rad2Deg;
-                    DrawIcon(arrow, map.center + delta * (limit / edge), 12, angle, Amber);
-                }
-                else
-                {
-                    DrawIcon(diamond, map.center + delta, 14, 0, Amber);
-                }
+                if (terrainStream && terrainStream.IsSpawnedMapSite(node)) continue;
+                DrawNode(node.transform.position, map);
+            }
+        }
+
+        void DrawNode(Vector3 position, Rect map)
+        {
+            Vector2 delta = Project(position, map) - map.center;
+            float limit = map.width * .5f - 8;
+            float edge = Mathf.Max(Mathf.Abs(delta.x), Mathf.Abs(delta.y));
+            if (edge > limit)
+            {
+                float angle = Mathf.Atan2(delta.x, -delta.y) * Mathf.Rad2Deg;
+                DrawIcon(arrow, map.center + delta * (limit / edge), 12, angle, Amber);
+            }
+            else
+            {
+                DrawIcon(diamond, map.center + delta, 14, 0, Amber);
             }
         }
 
@@ -109,7 +123,7 @@ namespace KeepDriving
             right = new GUIStyle(left) { alignment = TextAnchor.MiddleRight };
         }
 
-        void UpdateRelief(Scene scene, TerrainStream terrainStream)
+        void UpdateRelief(Scene scene)
         {
             System.Array.Fill(pixels, (Color32)Unmapped);
             float west = center.x - Range * .5f;
@@ -131,11 +145,6 @@ namespace KeepDriving
                 {
                     float u = (west + (x + .5f) * step - origin.x) / size.x;
                     float v = (south + (z + .5f) * step - origin.z) / size.z;
-                    if (terrainStream && terrainStream.HasWaterAt(terrain, u, v))
-                    {
-                        pixels[z * Resolution + x] = Water;
-                        continue;
-                    }
                     float height = origin.y + data.GetInterpolatedHeight(u, v);
                     Color color = Color.Lerp(Lowland, Highland, Mathf.InverseLerp(-3, 22, height));
                     float band = Mathf.Repeat(height, 3f);

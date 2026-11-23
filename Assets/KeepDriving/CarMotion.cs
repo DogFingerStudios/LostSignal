@@ -11,7 +11,7 @@ namespace KeepDriving
             velocity.y = 0;
             float longitudinal = Vector3.Dot(velocity, forward);
             Vector3 sideways = velocity - forward * longitudinal;
-            float cap = throttle >= 0 ? (boost ? 50 : 32f) : (boost ? 11f : 7f);
+            float cap = throttle >= 0 ? (boost ? 100 : 32f) : (boost ? 11f : 7f);
 
             if (!brake && Mathf.Abs(throttle) > .01f)
                 longitudinal = Mathf.MoveTowards(longitudinal, throttle * cap, (boost ? 10f : 7f) * dt);

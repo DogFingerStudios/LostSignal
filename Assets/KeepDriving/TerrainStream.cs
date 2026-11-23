@@ -1,7 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -11,59 +11,40 @@ namespace KeepDriving
     [RequireComponent(typeof(Terrain), typeof(TerrainCollider))]
     public sealed class TerrainStream : MonoBehaviour
     {
-        [SerializeField, Tooltip("Seed for generated terrain. Set before entering Play Mode.")]
-        private int worldSeed = 0;
-        [SerializeField, Range(0f, 100f), Tooltip("Approximate generated land covered by rivers and lakes.")]
-        private int waterCoverage = 5;
-        [SerializeField, Range(0, 100), Tooltip("Tree density on generated tiles. Set before entering Play Mode.")]
-        private int treeDensity = 25;
-        [SerializeField, Tooltip("Drop tree prefab assets here. Empty slots are ignored.")]
-        private GameObject[] treePrefabs = new GameObject[3];
+        [SerializeField] private TextAsset spawnGeoJson;
+        [SerializeField] private TextAsset sitesGeoJson;
+        [SerializeField] private TextAsset elevation;
+        [SerializeField] private Node satelliteDish;
 
-        private const int WindowRadius = 2;
-        private const float SpawnClearingRadius = 24f;
-        private const float PrefetchDistance = 125f;
+        private const int WindowRadius = 1;
         private const float OriginShiftDistance = 1600f;
-        private static readonly ProfilerMarker GenerateMarker = new ProfilerMarker("TerrainStream.GenerateHeights");
-        private static readonly ProfilerMarker InstallMarker = new ProfilerMarker("TerrainStream.InstallTile");
+        private const int TileSize = YanorraMap.TileSize;
+
+        private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
+        private readonly Dictionary<string, Node> _dishes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<GameObject> _roots = new();
+        private readonly List<Vector2Int> _expired = new();
+        private readonly CancellationTokenSource _shutdown = new();
 
         private Terrain _source;
         private TerrainCollider _sourceCollider;
         private TerrainData _sourceData;
-        private TerrainData _runtimeSourceData;
         private Vector3 _origin;
-        private Vector3 _size;
-        private Vector2 _noiseOffset;
-        private readonly Dictionary<Vector2Int, Terrain> _tiles = new Dictionary<Vector2Int, Terrain>();
-        private readonly Dictionary<Terrain, (RiverGenerator.Tile Layout, Mesh Mesh, GameObject Surface)> _waterTiles = new();
-        private readonly List<GameObject> _roots = new List<GameObject>();
-        private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
+        private Vector2Int _originTile;
+        private YanorraMap.Point _spawn;
+        private YanorraMap.Elevation _elevation;
+        private Dictionary<Vector2Int, List<YanorraMap.Point>> _sites;
         private float[,] _sourceHeights;
-        private RiverGenerator _rivers;
-        private TreeGenerator _trees;
-        private TreePrototype[] _treePrototypes;
-        private Material _waterMaterial;
-        private Task<TileContents> _pendingHeights;
+        private float _datumOffset, _baseY, _heightRange, _sourceHeightSize;
+        private GameObject _sitesRoot;
+        private Task<float[,]> _pendingHeights;
         private Vector2Int _pendingKey;
         private float _retryAfter;
-        private Vector2Int _originTile;
-        private bool _sourceReady;
 
-        private readonly struct TileContents
-        {
-            public readonly float[,] Heights;
-            public readonly RiverGenerator.Tile Water;
-            public readonly Vector3[] Surface;
-            public readonly TreeInstance[] Trees;
-
-            public TileContents(float[,] heights, RiverGenerator.Tile water, Vector3[] surface, TreeInstance[] trees)
-            {
-                Heights = heights;
-                Water = water;
-                Surface = surface;
-                Trees = trees;
-            }
-        }
+        public bool HasSource => isActiveAndEnabled && _sourceData && _elevation != null;
+        public bool InitialWindowReady { get; private set; }
+        public float SpawnHeading => _spawn.Heading;
+        public float RecoveryHeight => _baseY - 20f;
 
         private void Awake()
         {
@@ -72,110 +53,129 @@ namespace KeepDriving
             _sourceData = _source.terrainData;
             if (!_sourceData) return;
 
-            _noiseOffset = NoiseOffset(worldSeed);
+            try
+            {
+                if (_sourceData.size.x != TileSize || _sourceData.size.z != TileSize)
+                    throw new InvalidOperationException("The authored starting terrain must be 500 m × 500 m.");
+
+                _spawn = YanorraMap.ReadSpawn(spawnGeoJson);
+                _sites = YanorraMap.ReadSites(sitesGeoJson);
+                if (_sites.Count > 0 && !satelliteDish)
+                    throw new InvalidOperationException("Assign the SatelliteDish prefab's Node to the terrain streamer.");
+                _elevation = new YanorraMap.Elevation(elevation);
+            }
+            catch (Exception error)
+            {
+                Debug.LogError($"Could not load the Yanorra map: {error.Message}", this);
+                return;
+            }
+
             _origin = _source.GetPosition();
-            _size = _sourceData.size;
-            if (treeDensity > 0 && treePrefabs != null)
-            {
-                var prototypes = new List<TreePrototype>(treePrefabs.Length);
-                foreach (var prefab in treePrefabs)
-                    if (prefab && !prefab.scene.IsValid())
-                        prototypes.Add(new TreePrototype { prefab = prefab });
-                if (prototypes.Count > 0)
-                {
-                    _treePrototypes = prototypes.ToArray();
-                    _trees = new TreeGenerator(worldSeed, treeDensity, prototypes.Count, _size, SpawnClearingRadius);
-                }
-            }
-            if (waterCoverage > 0)
-            {
-                var shader = Resources.Load<Shader>("ProceduralWater");
-                if (shader)
-                {
-                    _waterMaterial = new Material(shader) { name = "Procedural River and Lake Water" };
-                    _rivers = new RiverGenerator(worldSeed, waterCoverage, new Vector2(_size.x, _size.z), SpawnClearingRadius);
-                }
-                else
-                {
-                    Debug.LogError("Procedural water shader is missing. Terrain will generate dry.", this);
-                }
-            }
+            _originTile = _spawn.Tile;
+            _sourceHeightSize = _sourceData.size.y;
             int resolution = _sourceData.heightmapResolution;
             _sourceHeights = _sourceData.GetHeights(0, 0, resolution, resolution);
-            _tiles.Add(Vector2Int.zero, _source);
-            _sourceReady = _rivers == null && _trees == null && _sourceData.treeInstanceCount == 0;
+            // Keep the authored scene in place and align its local vertical datum at the spawn.
+            _datumOffset = GetSpawnPosition(Vector2.zero, 0f).y - _elevation.Sample(_spawn.East, _spawn.North);
+            _baseY = Mathf.Min(_origin.y, _elevation.Min + _datumOffset);
+            _heightRange = Mathf.Max(_origin.y + _sourceData.size.y, _elevation.Max + _datumOffset) - _baseY;
+            _source.allowAutoConnect = false;
+            _tiles.Add(_spawn.Tile, _source);
+            InstallSites(_spawn.Tile, _source);
         }
 
-        public bool HasSource => isActiveAndEnabled && _sourceData;
-        public bool InitialWindowReady { get; private set; }
+        public Vector3 SpawnPosition => GetSpawnPosition(Vector2.zero, 1f);
 
-        public Vector3 SpawnPosition => GetSpawnPosition(0f, 1f);
-        public Vector3 VehicleSpawnPosition => GetSpawnPosition(5f, .75f);
-
-        private Vector3 GetSpawnPosition(float northOffset, float heightOffset)
+        public Vector3 VehicleSpawnPosition
         {
-            float z = _size.z * .5f + northOffset;
-            float height = _sourceData.GetInterpolatedHeight(.5f, z / _size.z);
-            return _origin + new Vector3(_size.x * .5f, height + heightOffset, z) - TileOffset(_originTile);
+            get
+            {
+                float heading = SpawnHeading * Mathf.Deg2Rad;
+                return GetSpawnPosition(new Vector2(Mathf.Sin(heading), Mathf.Cos(heading)) * 5f, .75f);
+            }
         }
 
-        private Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * _size.x, 0, tile.y * _size.z);
+        private Vector3 GetSpawnPosition(Vector2 offset, float heightOffset)
+        {
+            Vector2Int key = _spawn.Tile;
+            float x = Mathf.Clamp((float)(_spawn.East - key.x * TileSize) + offset.x, 0, TileSize);
+            float z = Mathf.Clamp((float)(_spawn.North - key.y * TileSize) + offset.y, 0, TileSize);
+            float height = _sourceData.GetInterpolatedHeight(x / TileSize, z / TileSize);
+            return _origin + TileOffset(key - _originTile) + new Vector3(x, height + heightOffset, z);
+        }
+
+        private static Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * TileSize, 0, tile.y * TileSize);
 
         public Vector2Int? GetTile(Vector3 point) => HasSource ? WorldTile(point) : null;
 
-        internal bool HasWaterAt(Terrain terrain, float u, float v) =>
-            _waterTiles.TryGetValue(terrain, out var water) && water.Layout.ContainsWater(u, v);
+        internal YanorraMap.Elevation MapElevation => _elevation;
+
+        internal Vector2 ToMapPosition(Vector3 position) => new Vector2(
+            _originTile.x * TileSize + (position.x - _origin.x),
+            _originTile.y * TileSize + (position.z - _origin.z));
+
+        internal void CollectWorldMapSites(List<Vector2> positions)
+        {
+            positions.Clear();
+            if (!HasSource) return;
+            foreach (var sites in _sites.Values)
+            foreach (var site in sites)
+                positions.Add(new Vector2((float)site.East, (float)site.North));
+        }
+
+        internal void CollectMapSitePositions(List<Vector3> positions)
+        {
+            positions.Clear();
+            if (!HasSource) return;
+            foreach (var sites in _sites.Values)
+            foreach (var site in sites)
+                positions.Add(new Vector3(
+                    _origin.x + (float)(site.East - _originTile.x * TileSize),
+                    0f,
+                    _origin.z + (float)(site.North - _originTile.y * TileSize)));
+        }
+
+        internal bool IsSpawnedMapSite(Node node) =>
+            HasSource && _sitesRoot && node.transform.IsChildOf(_sitesRoot.transform);
 
         private Vector2Int WorldTile(Vector3 point)
         {
-            return _originTile + new Vector2Int(Mathf.FloorToInt((point.x - _origin.x) / _size.x),
-                Mathf.FloorToInt((point.z - _origin.z) / _size.z));
+            double east = _originTile.x * TileSize + (double)point.x - _origin.x;
+            double north = _originTile.y * TileSize + (double)point.z - _origin.z;
+            return new Vector2Int(YanorraMap.TileIndex(east), YanorraMap.TileIndex(north));
         }
 
-        // Returns true when the gameplay scene was shifted to keep physics near the origin.
         public bool ShiftOriginIfNeeded(Vector3 focus)
         {
-            if (!HasSource)
-            {
+            if (!HasSource || (Mathf.Abs(focus.x) <= OriginShiftDistance && Mathf.Abs(focus.z) <= OriginShiftDistance))
                 return false;
-            }
-
             Vector2Int center = WorldTile(focus);
-            bool shifted = Mathf.Abs(focus.x) > OriginShiftDistance || Mathf.Abs(focus.z) > OriginShiftDistance;
-            if (shifted)
-            {
-                Vector3 shift = TileOffset(center - _originTile);
-                if (shift == Vector3.zero)
-                {
-                    shifted = false;
-                }
-                else
-                {
-                    gameObject.scene.GetRootGameObjects(_roots);
-                    foreach (GameObject root in _roots)
-                    {
-                        root.transform.position -= shift;
-                    }
+            Vector3 shift = TileOffset(center - _originTile);
+            if (shift == Vector3.zero) return false;
 
-                    _originTile = center;
-                }
-            }
+            gameObject.scene.GetRootGameObjects(_roots);
+            foreach (GameObject root in _roots)
+                root.transform.position -= shift;
 
-            if (shifted) Physics.SyncTransforms();
-            return shifted;
+            _originTile = center;
+            Physics.SyncTransforms();
+            return true;
         }
 
-        // Call once per rendered frame. Only this method installs streamed tiles.
         public void Pump(Vector3 focus)
         {
             if (!HasSource) return;
             Vector2Int center = WorldTile(focus);
-            Vector3 withinTile = focus - (_origin + TileOffset(center - _originTile));
-            var ahead = new Vector2Int(
-                PrefetchDirection(withinTile.x, _size.x),
-                PrefetchDirection(withinTile.z, _size.z));
-            var min = center + Vector2Int.Min(ahead, Vector2Int.zero) - Vector2Int.one * WindowRadius;
-            var max = center + Vector2Int.Max(ahead, Vector2Int.zero) + Vector2Int.one * WindowRadius;
+            var min = Vector2Int.Max(Vector2Int.zero, center - Vector2Int.one * WindowRadius);
+            var max = Vector2Int.Min(Vector2Int.one * (YanorraMap.TileCount - 1), center + Vector2Int.one * WindowRadius);
+
+            _expired.Clear();
+            foreach (var entry in _tiles)
+                if (!Contains(entry.Key, min, max))
+                    _expired.Add(entry.Key);
+            foreach (var key in _expired)
+                UnloadTile(key);
+            if (_expired.Count > 0) RefreshNeighbors();
 
             if (_pendingHeights?.IsCompleted == true)
             {
@@ -183,108 +183,57 @@ namespace KeepDriving
                 _pendingHeights = null;
                 if (completed.IsFaulted)
                 {
-                    Debug.LogException(completed.Exception);
+                    Debug.LogException(completed.Exception, this);
                     _retryAfter = Time.unscaledTime + 1f;
-                }
-                else if (!completed.IsCanceled && !_sourceReady)
-                {
-                    InstallStartingTile(completed.Result);
-                    _sourceReady = true;
-                    return;
                 }
                 else if (!completed.IsCanceled && Contains(_pendingKey, min, max))
                 {
-                    _tiles.Add(_pendingKey, CreateTile(_pendingKey, completed.Result));
+                    Terrain terrain = CreateTile(_pendingKey, completed.Result);
+                    _tiles.Add(_pendingKey, terrain);
+                    InstallSites(_pendingKey, terrain);
                     RefreshNeighbors();
-                    return;
                 }
             }
 
-            if (!_sourceReady)
-            {
-                if (_pendingHeights == null && Time.unscaledTime >= _retryAfter)
-                    QueueTile(Vector2Int.zero);
-                return;
-            }
-
             Vector2Int? next = null;
-            int bestPriority = int.MaxValue;
+            int distance = int.MaxValue;
             for (int z = min.y; z <= max.y; z++)
             for (int x = min.x; x <= max.x; x++)
             {
                 var key = new Vector2Int(x, z);
                 if (_tiles.ContainsKey(key)) continue;
-                var offset = key - center;
-                bool prefetchOnly = Mathf.Abs(offset.x) > WindowRadius || Mathf.Abs(offset.y) > WindowRadius;
-                int priority = offset.sqrMagnitude + (prefetchOnly ? 100 : 0);
-                if (priority < bestPriority)
+                int priority = (key - center).sqrMagnitude;
+                if (priority < distance)
                 {
                     next = key;
-                    bestPriority = priority;
+                    distance = priority;
                 }
             }
 
-            if (bestPriority >= 100)
+            if (next == null)
             {
                 InitialWindowReady = true;
-                // Keep existing colliders until all tiles in the new window are installed.
-                Vector2Int? expired = null;
-                foreach (var entry in _tiles)
-                    if (!Contains(entry.Key, min, max))
-                    {
-                        expired = entry.Key;
-                        break;
-                    }
-                if (expired is Vector2Int key)
-                {
-                    UnloadTile(key);
-                    RefreshNeighbors();
-                    return;
-                }
-            }
-
-            if (_pendingHeights != null || Time.unscaledTime < _retryAfter || next is not Vector2Int requested)
                 return;
-            if (requested == Vector2Int.zero)
+            }
+            if (_pendingHeights != null || Time.unscaledTime < _retryAfter) return;
+            Vector2Int requested = next.Value;
+            if (requested == _spawn.Tile)
             {
                 RestoreSourceTile();
                 return;
             }
 
-            QueueTile(requested);
-        }
-
-        private void QueueTile(Vector2Int key)
-        {
-            _pendingKey = key;
-            float[,] sourceHeights = _sourceHeights;
-            float amplitude = Mathf.Min(18f / _size.y, 1f);
-            Vector2 noiseOffset = _noiseOffset;
-            RiverGenerator rivers = _rivers;
-            TreeGenerator trees = _trees;
-            float heightScale = _size.y;
+            _pendingKey = requested;
             CancellationToken token = _shutdown.Token;
-            _pendingHeights = Task.Run(() =>
-            {
-                var water = rivers?.GenerateTile(key, token);
-                var heights = GenerateHeights(key, sourceHeights, amplitude, noiseOffset, water, heightScale, token);
-                return new TileContents(heights, water, water?.BuildSurface(token),
-                    trees?.GenerateTile(key, heights, water, token));
-            }, token);
+            _pendingHeights = Task.Run(() => SampleTile(requested, token), token);
         }
 
         public void RestoreSourceTile()
         {
-            if (_tiles.ContainsKey(Vector2Int.zero)) return;
+            if (!HasSource || _tiles.ContainsKey(_spawn.Tile)) return;
             SetSourceTileLoaded(true);
-            _tiles.Add(Vector2Int.zero, _source);
+            _tiles.Add(_spawn.Tile, _source);
             RefreshNeighbors();
-        }
-
-        private static int PrefetchDirection(float position, float size)
-        {
-            float margin = Mathf.Min(PrefetchDistance, size * .25f);
-            return position < margin ? -1 : position > size - margin ? 1 : 0;
         }
 
         private static bool Contains(Vector2Int key, Vector2Int min, Vector2Int max) =>
@@ -292,132 +241,95 @@ namespace KeepDriving
 
         private void UnloadTile(Vector2Int key)
         {
-            if (key == Vector2Int.zero)
+            var terrain = _tiles[key];
+            _tiles.Remove(key);
+            if (terrain == _source)
             {
                 _source.SetNeighbors(null, null, null, null);
                 SetSourceTileLoaded(false);
             }
             else
             {
-                DestroyTile(_tiles[key]);
+                DestroyTile(terrain);
             }
-            _tiles.Remove(key);
         }
 
         private void SetSourceTileLoaded(bool loaded)
         {
-            // The streamer and atmosphere share this GameObject with the authored tile.
+            // Keep the scene GameObject and any authored children alive.
             _source.enabled = loaded;
             _sourceCollider.enabled = loaded;
-            if (_waterTiles.TryGetValue(_source, out var water))
-                water.Surface.SetActive(loaded);
         }
 
         private void RefreshNeighbors()
         {
             foreach (var entry in _tiles)
             {
-                Vector2Int key = entry.Key;
+                var key = entry.Key;
                 entry.Value.SetNeighbors(Find(key + Vector2Int.left), Find(key + Vector2Int.up),
                     Find(key + Vector2Int.right), Find(key + Vector2Int.down));
             }
             Physics.SyncTransforms();
         }
 
-        private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out Terrain terrain) ? terrain : null;
+        private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out var terrain) ? terrain : null;
 
-        private static Vector2 NoiseOffset(int seed)
+        private float[,] SampleTile(Vector2Int key, CancellationToken token)
         {
-            // Seed zero keeps the terrain layout from before the seed was exposed.
-            var originalOffset = new Vector2(37.5f, 71.5f);
-            unchecked
-            {
-                uint hash = (uint)seed;
-                hash = (hash ^ (hash >> 16)) * 0x7feb352du;
-                hash = (hash ^ (hash >> 15)) * 0x846ca68bu;
-                hash ^= hash >> 16;
-                return originalOffset + new Vector2(hash & 0xffffu, hash >> 16) / 256f;
-            }
-        }
-
-        private static float[,] GenerateHeights(Vector2Int key, float[,] sourceHeights,
-            float amplitude, Vector2 noiseOffset, RiverGenerator.Tile water, float heightScale, CancellationToken token)
-        {
-            using var sample = GenerateMarker.Auto();
-            bool starting = key == Vector2Int.zero;
-            if (starting && water == null) return sourceHeights;
-            int resolution = sourceHeights.GetLength(0);
+            int resolution = _sourceHeights.GetLength(0);
             var heights = new float[resolution, resolution];
-            bool nearSource = Mathf.Abs(key.x) <= 1 && Mathf.Abs(key.y) <= 1;
+            Vector2Int offset = key - _spawn.Tile;
+            bool bordersSource = Mathf.Abs(offset.x) <= 1 && Mathf.Abs(offset.y) <= 1;
             for (int z = 0; z < resolution; z++)
             {
                 token.ThrowIfCancellationRequested();
+                double v = z / (resolution - 1.0);
                 for (int x = 0; x < resolution; x++)
                 {
-                    float u = x / (resolution - 1f), v = z / (resolution - 1f);
-                    if (starting)
+                    double u = x / (resolution - 1.0);
+                    float height = _elevation.Sample((key.x + u) * TileSize, (key.y + v) * TileSize) + _datumOffset;
+                    if (bordersSource)
                     {
-                        heights[z, x] = Mathf.Clamp01(water.ShapeGround(u, v, sourceHeights[z, x] * heightScale) / heightScale);
-                        continue;
+                        float localX = offset.x + (float)u, localZ = offset.y + (float)v;
+                        float edgeX = Mathf.Clamp01(localX), edgeZ = Mathf.Clamp01(localZ);
+                        float distance = Mathf.Max(Mathf.Abs(localX - edgeX), Mathf.Abs(localZ - edgeZ));
+                        float weight = Mathf.SmoothStep(0, 1, distance);
+                        height = Mathf.Lerp(SampleSourceEdge(edgeX, edgeZ), height, weight);
                     }
-                    float worldX = key.x + u;
-                    float worldZ = key.y + v;
-                    float edgeX = Mathf.Clamp01(worldX);
-                    float edgeZ = Mathf.Clamp01(worldZ);
-                    float distance = Mathf.Max(Mathf.Abs(worldX - edgeX), Mathf.Abs(worldZ - edgeZ));
-                    float blend = Mathf.SmoothStep(0f, 1f, distance * 2f);
-                    // Sample one continuous noise field in logical world coordinates across every tile.
-                    float hills = Mathf.PerlinNoise(worldX * 3.2f + noiseOffset.x, worldZ * 3.2f + noiseOffset.y)
-                        * amplitude;
-                    float edgeHeight = nearSource && blend < 1f
-                        ? SampleSourceEdge(sourceHeights, edgeX, edgeZ) : 0f;
-                    float height = Mathf.Lerp(edgeHeight, hills, blend);
-                    heights[z, x] = water == null ? height
-                        : Mathf.Clamp01(water.ShapeGround(u, v, height * heightScale) / heightScale);
+                    heights[z, x] = Mathf.Clamp01((height - _baseY) / _heightRange);
                 }
             }
             return heights;
         }
 
-        private static float SampleSourceEdge(float[,] heights, float u, float v)
+        private float SampleSourceEdge(float u, float v)
         {
-            int last = heights.GetLength(0) - 1;
+            int last = _sourceHeights.GetLength(0) - 1;
             float x = u * last, z = v * last;
             int x0 = (int)x, z0 = (int)z;
             int x1 = Mathf.Min(x0 + 1, last), z1 = Mathf.Min(z0 + 1, last);
-            float south = Mathf.Lerp(heights[z0, x0], heights[z0, x1], x - x0);
-            float north = Mathf.Lerp(heights[z1, x0], heights[z1, x1], x - x0);
-            return Mathf.Lerp(south, north, z - z0);
+            float a = Mathf.Lerp(_sourceHeights[z0, x0], _sourceHeights[z0, x1], x - x0);
+            float b = Mathf.Lerp(_sourceHeights[z1, x0], _sourceHeights[z1, x1], x - x0);
+            return _origin.y + Mathf.Lerp(a, b, z - z0) * _sourceHeightSize;
         }
 
-        private Terrain CreateTile(Vector2Int key, TileContents contents)
+        private Terrain CreateTile(Vector2Int key, float[,] heights)
         {
-            using var sample = InstallMarker.Auto();
             var layers = _sourceData.terrainLayers;
             var data = new TerrainData
             {
-                heightmapResolution = contents.Heights.GetLength(0),
-                size = _size,
+                heightmapResolution = heights.GetLength(0),
+                size = new Vector3(TileSize, _heightRange, TileSize),
                 terrainLayers = layers
             };
-            data.SetHeights(0, 0, contents.Heights);
-            if (contents.Trees is { Length: > 0 })
-            {
-                data.treePrototypes = _treePrototypes;
-                data.SetTreeInstances(contents.Trees, true);
-            }
-
+            data.SetHeights(0, 0, heights);
             if (layers.Length > 0)
             {
                 data.alphamapResolution = 16;
                 var paint = new float[16, 16, layers.Length];
                 for (int z = 0; z < 16; z++)
-                {
-                    for (int x = 0; x < 16; x++)
-                    {
-                        paint[z, x, 0] = 1;
-                    }
-                }
+                for (int x = 0; x < 16; x++)
+                    paint[z, x, 0] = 1;
                 data.SetAlphamaps(0, 0, paint);
             }
 
@@ -425,101 +337,45 @@ namespace KeepDriving
             SceneManager.MoveGameObjectToScene(tile, gameObject.scene);
             tile.name = $"Terrain ({key.x}, {key.y})";
             tile.layer = _source.gameObject.layer;
-            tile.transform.position = _origin + TileOffset(key - _originTile);
+            Vector3 position = _origin + TileOffset(key - _originTile);
+            position.y = _baseY;
+            tile.transform.position = position;
             var terrain = tile.GetComponent<Terrain>();
             terrain.allowAutoConnect = false;
             terrain.drawInstanced = _source.drawInstanced;
             terrain.heightmapPixelError = _source.heightmapPixelError;
             terrain.materialTemplate = _source.materialTemplate;
-            if (contents.Surface is { Length: > 0 })
-                AttachWaterSurface(terrain, contents);
             return terrain;
         }
 
-        private void InstallStartingTile(TileContents contents)
+        private void InstallSites(Vector2Int key, Terrain terrain)
         {
-            using var sample = InstallMarker.Auto();
-            // Sculpt and plant on a runtime copy to preserve the editor's painted terrain asset.
-            _runtimeSourceData = Instantiate(_sourceData);
-            _runtimeSourceData.name = _sourceData.name + " (Runtime)";
-            if (contents.Water != null)
-                _runtimeSourceData.SetHeights(0, 0, contents.Heights);
-            ApplyStartingTrees(contents);
-            _source.terrainData = _runtimeSourceData;
-            _sourceCollider.terrainData = _runtimeSourceData;
-            if (contents.Surface is { Length: > 0 })
-                AttachWaterSurface(_source, contents);
-            RefreshNeighbors();
-        }
-
-        private void ApplyStartingTrees(TileContents contents)
-        {
-            var authored = _sourceData.treeInstances;
-            int generatedCount = contents.Trees?.Length ?? 0;
-            if (authored.Length == 0 && generatedCount == 0) return;
-
-            var instances = new List<TreeInstance>(authored.Length + generatedCount);
-            foreach (var tree in authored)
+            if (!_sites.TryGetValue(key, out var points)) return;
+            foreach (var point in points)
             {
-                float u = tree.position.x, v = tree.position.z;
-                if (!TreeGenerator.InSpawnClearing(u, v, _size, SpawnClearingRadius * SpawnClearingRadius)
-                    && contents.Water?.ContainsWater(u, v) != true)
-                    instances.Add(tree);
-            }
-
-            if (generatedCount > 0)
-            {
-                var prototypes = new List<TreePrototype>(_sourceData.treePrototypes);
-                int offset = prototypes.Count;
-                prototypes.AddRange(_treePrototypes);
-                _runtimeSourceData.treePrototypes = prototypes.ToArray();
-                foreach (var generated in contents.Trees)
+                if (_dishes.ContainsKey(point.Id)) continue;
+                if (!_sitesRoot)
                 {
-                    var tree = generated;
-                    tree.prototypeIndex += offset;
-                    instances.Add(tree);
+                    _sitesRoot = new GameObject("Authored map sites");
+                    SceneManager.MoveGameObjectToScene(_sitesRoot, gameObject.scene);
                 }
+
+                float x = (float)(point.East - key.x * TileSize), z = (float)(point.North - key.y * TileSize);
+                float height = terrain.terrainData.GetInterpolatedHeight(x / TileSize, z / TileSize);
+                Vector3 position = terrain.GetPosition() + new Vector3(x, height, z);
+                Node dish = Instantiate(satelliteDish, position, Quaternion.Euler(0, point.Heading, 0), _sitesRoot.transform);
+                dish.NodeName = point.Name;
+                dish.name = point.Name;
+                _dishes.Add(point.Id, dish);
             }
-            _runtimeSourceData.SetTreeInstances(instances.ToArray(), true);
         }
 
-        private void AttachWaterSurface(Terrain terrain, TileContents contents)
+        private static void DestroyTile(Terrain terrain)
         {
-            var mesh = new Mesh { name = "Water Surface" };
-            mesh.vertices = contents.Surface;
-            var indices = new int[contents.Surface.Length];
-            for (int i = 0; i < indices.Length; i++) indices[i] = i;
-            mesh.triangles = indices;
-            mesh.UploadMeshData(true);
-
-            var water = new GameObject("Procedural Water");
-            water.transform.SetParent(terrain.transform, false);
-            water.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var renderer = water.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = _waterMaterial;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            _waterTiles.Add(terrain, (contents.Water, mesh, water));
-        }
-
-        private void DestroyWater(Terrain tile)
-        {
-            if (!_waterTiles.Remove(tile, out var water)) return;
-            Object.Destroy(water.Mesh);
-            if (water.Surface) Object.Destroy(water.Surface);
-        }
-
-        private void DestroyTile(Terrain tile)
-        {
-            DestroyWater(tile);
-            if (!tile)
-            {
-                return;
-            }
-
-            tile.gameObject.SetActive(false);
-            Object.Destroy(tile.terrainData);
-            Object.Destroy(tile.gameObject);
+            if (!terrain) return;
+            terrain.gameObject.SetActive(false);
+            Destroy(terrain.terrainData);
+            Destroy(terrain.gameObject);
         }
 
         private void OnDestroy()
@@ -529,27 +385,11 @@ namespace KeepDriving
             if (_source)
             {
                 _source.SetNeighbors(null, null, null, null);
-                if (_runtimeSourceData) _source.terrainData = _sourceData;
-                if (_sourceCollider)
-                {
-                    if (_runtimeSourceData) _sourceCollider.terrainData = _sourceData;
-                    if (gameObject.scene.isLoaded) SetSourceTileLoaded(true);
-                }
+                if (_sourceCollider && gameObject.scene.isLoaded) SetSourceTileLoaded(true);
             }
-            if (_runtimeSourceData)
-            {
-                DestroyWater(_source);
-                Object.Destroy(_runtimeSourceData);
-            }
-            foreach (var entry in _tiles)
-            {
-                if (entry.Key != Vector2Int.zero)
-                {
-                    DestroyTile(entry.Value);
-                }
-            }
-            _tiles.Clear();
-            if (_waterMaterial) Object.Destroy(_waterMaterial);
+            foreach (var terrain in _tiles.Values)
+                if (terrain != _source) DestroyTile(terrain);
+            if (_sitesRoot) Destroy(_sitesRoot);
         }
     }
 }
