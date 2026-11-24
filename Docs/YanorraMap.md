@@ -14,13 +14,16 @@ the authored height along the starting tile edges. The grid is 500 m per
 tile and the streamer loads at most nine terrain tiles. Map-created dishes
 are kept independently of terrain for the current play session.
 
-After QGIS updates Elevation-from-points.tif, regenerate the Unity height
-asset from the project root in PowerShell:
+Keep elevation_control_points.geojson in Assets/MapData. Unity reads the
+saved height_m values at startup and interpolates between the points
+using a triangulated surface. Keep a point at each world corner to
+control heights along the edges. When a corner is missing, Unity samples
+that corner from elevation.bytes, or uses 0 m if that asset is absent.
 
-    & 'C:\Program Files\QGIS 3.44.7\bin\python-qgis.bat' 'Docs\ExportUnityElevation.py' 'Maps\Elevation-from-points.tif' 'Assets\MapData\elevation.bytes'
+Replace the GeoJSON in place and reenter Play Mode to see your edits.
+Rebuild a standalone game to include the updated asset. The QGIS
+GeoTIFF is useful for previewing terrain in QGIS. Unity can still use
+elevation.bytes in scenes without a control-point asset.
 
-Use the aligned Float32 raster with no gaps. Unity reads it as meter
-elevations on the same grid. Save QGIS edits and let the terrain macro
-finish before running the export. Enter Play Mode again after replacing
-the inputs. Seeded height, tree, and water generation is disabled for
-streamed tiles. Scene-authored terrain, trees, and props remain in place.
+Scene-authored terrain, trees, and props remain in place. Seeded height,
+tree, and water generation is disabled for streamed tiles.

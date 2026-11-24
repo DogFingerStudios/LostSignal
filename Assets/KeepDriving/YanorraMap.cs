@@ -107,12 +107,14 @@ namespace KeepDriving
 
         internal sealed class Elevation
         {
-            private readonly float[] _pixels = new float[RasterSize * RasterSize];
+            private readonly float[] _pixels;
+            private readonly ControlPointSurface _surface;
             public readonly float Min;
             public readonly float Max;
 
             public Elevation(TextAsset asset)
             {
+                _pixels = new float[RasterSize * RasterSize];
                 var bytes = asset ? asset.bytes : null;
                 if (bytes == null || bytes.Length != _pixels.Length * sizeof(float) || !BitConverter.IsLittleEndian)
                     throw new FormatException("Expected the Yanorra 2000 x 2000 little-endian Float32 elevation asset.");
@@ -128,8 +130,16 @@ namespace KeepDriving
                 }
             }
 
+            public Elevation(TextAsset controlPoints, TextAsset fallback)
+            {
+                _surface = new ControlPointSurface(controlPoints, fallback);
+                Min = _surface.Min;
+                Max = _surface.Max;
+            }
+
             public float Sample(double east, double north)
             {
+                if (_surface != null) return _surface.SampleHeight(east, north);
                 // GeoTIFF rows run from north to south. Values are stored at pixel centers.
                 double x = Math.Max(0, Math.Min(RasterSize - 1, east / CellSize - 0.5));
                 double z = Math.Max(0, Math.Min(RasterSize - 1, (WorldSize - north) / CellSize - 0.5));

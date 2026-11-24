@@ -44,7 +44,7 @@ namespace KeepDriving
             Fill(new Rect(map.x - 16, map.y - 42, size + 32, size + 88), Panel);
             Fill(new Rect(map.x - 1, map.y - 1, size + 2, size + 2), Border);
             GUI.DrawTexture(map, _terrain);
-            stream.DrawMapRoads(map, new Rect(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize));
+            stream.DrawMapRoutes(map, new Rect(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize));
             GUI.Label(new Rect(map.x, map.y - 40, size, 35), "YANORRA", _title);
             GUI.Label(new Rect(map.xMax - 86, map.y - 36, 86, 24), "200 × 200 km", _label);
             GUI.Label(new Rect(map.xMax - 32, map.y + 8, 24, 20), "N ↑", _centered);

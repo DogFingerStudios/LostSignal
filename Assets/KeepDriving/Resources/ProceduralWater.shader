@@ -1,5 +1,12 @@
 Shader "KeepDriving/Procedural Water"
 {
+    Properties
+    {
+        _WaterTint ("Water Tint", Color) = (1, 1, 1, 1)
+        _RippleStrength ("Ripple Strength", Float) = 1
+        _RippleSpeed ("Ripple Speed", Float) = 1
+    }
+
     SubShader
     {
         Tags { "RenderPipeline"="UniversalPipeline" "RenderType"="Opaque" }
@@ -13,6 +20,12 @@ Shader "KeepDriving/Procedural Water"
             #pragma vertex Vert
             #pragma fragment Frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _WaterTint;
+                float _RippleStrength;
+                float _RippleSpeed;
+            CBUFFER_END
 
             struct Attributes { float3 positionOS : POSITION; };
             struct Varyings
@@ -32,7 +45,7 @@ Shader "KeepDriving/Procedural Water"
             half4 Frag(Varyings input) : SV_Target
             {
                 float2 p = input.worldPosition.xz;
-                float time = _Time.y;
+                float time = _Time.y * _RippleSpeed;
                 float bend = sin(p.y * .13 + p.x * .025);
                 float wave = sin(p.x * .31 + p.y * .19 - time * 1.6 + bend * 1.4);
                 float crossWave = sin(p.x * .57 - p.y * .29 - time * 1.2);
@@ -40,7 +53,7 @@ Shader "KeepDriving/Procedural Water"
                 float3 view = normalize(GetWorldSpaceViewDir(input.worldPosition));
                 float grazing = pow(saturate(1.0 - abs(view.y)), 3.0);
                 half3 blue = lerp(half3(.035, .19, .24), half3(.14, .34, .39), grazing);
-                return half4(blue + ripple * half3(.035, .075, .08), 1.0);
+                return half4((blue + ripple * half3(.035, .075, .08) * _RippleStrength) * _WaterTint.rgb, 1.0);
             }
             ENDHLSL
         }

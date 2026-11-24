@@ -14,24 +14,29 @@ namespace KeepDriving
         [SerializeField] private TextAsset spawnGeoJson;
         [SerializeField] private TextAsset sitesGeoJson;
         [SerializeField] private TextAsset elevation;
+        [SerializeField] private TextAsset elevationControlPoints;
         [SerializeField] private Node satelliteDish;
         [SerializeField] private TextAsset roadsGeoJson;
         [SerializeField] private Shader dirtRoadShader;
+        [SerializeField] private TextAsset waterwaysGeoJson;
 
         private const int WindowRadius = 1;
         private const float OriginShiftDistance = 1600f;
+        private const float RiverDepth = 10f, StreamDepth = 5f, SeasonalStreamDepth = 1f;
         private const int TileSize = YanorraMap.TileSize;
 
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
         private readonly Dictionary<string, Node> _dishes = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<Terrain, MeshFilter> _roadSurfaces = new();
-        private DirtRoads _roads;
+        private readonly Dictionary<Terrain, List<MeshFilter>> _routeMeshes = new();
+        private RouteSurface _roads;
+        private readonly List<(RouteSurface Surface, Material Material, string Name, Color MapColor, float MapWidth)> _waterways = new();
         private Material _roadMaterial;
         private readonly List<GameObject> _roots = new();
         private readonly List<Vector2Int> _expired = new();
         private readonly CancellationTokenSource _shutdown = new();
 
-        private Terrain _source;
+        private Terrain _source, _startingTerrain;
+        private TerrainCollider _startingCollider;
         private TerrainCollider _sourceCollider;
         private TerrainData _sourceData;
         private Vector3 _origin;
@@ -55,6 +60,8 @@ namespace KeepDriving
         {
             _source = GetComponent<Terrain>();
             _sourceCollider = GetComponent<TerrainCollider>();
+            _startingTerrain = _source;
+            _startingCollider = _sourceCollider;
             _sourceData = _source.terrainData;
             if (!_sourceData) return;
 
@@ -67,7 +74,9 @@ namespace KeepDriving
                 _sites = YanorraMap.ReadSites(sitesGeoJson);
                 if (_sites.Count > 0 && !satelliteDish)
                     throw new InvalidOperationException("Assign the SatelliteDish prefab's Node to the terrain streamer.");
-                _elevation = new YanorraMap.Elevation(elevation);
+                _elevation = elevationControlPoints
+                    ? new YanorraMap.Elevation(elevationControlPoints, elevation)
+                    : new YanorraMap.Elevation(elevation);
             }
             catch (Exception error)
             {
@@ -82,24 +91,37 @@ namespace KeepDriving
             _sourceHeights = _sourceData.GetHeights(0, 0, resolution, resolution);
             // Keep the authored scene in place and align its local vertical datum at the spawn.
             _datumOffset = GetSpawnPosition(Vector2.zero, 0f).y - _elevation.Sample(_spawn.East, _spawn.North);
-            _baseY = Mathf.Min(_origin.y, _elevation.Min + _datumOffset);
+            _baseY = Mathf.Min(_origin.y, _elevation.Min + _datumOffset) - RiverDepth;
             _heightRange = Mathf.Max(_origin.y + _sourceData.size.y, _elevation.Max + _datumOffset) - _baseY;
             _source.allowAutoConnect = false;
-            _tiles.Add(_spawn.Tile, _source);
-            InstallSites(_spawn.Tile, _source);
             if (roadsGeoJson && dirtRoadShader)
             {
                 try
                 {
-                    _roads = new DirtRoads(roadsGeoJson);
+                    _roads = new RouteSurface(roadsGeoJson, "route_type", "dirt road", 5f, 4f, .05f);
                     _roadMaterial = new Material(dirtRoadShader) { name = "Dirt road", color = new Color(.42f, .26f, .15f) };
-                    AttachRoad(_spawn.Tile, _source);
                 }
                 catch (Exception error)
                 {
                     Debug.LogWarning($"Could not load dirt roads: {error.Message}", this);
                 }
             }
+            if (waterwaysGeoJson)
+            {
+                var shader = Resources.Load<Shader>("ProceduralWater");
+                if (shader)
+                {
+                    AddWaterway(shader, "river", 30f, RiverDepth, new Color(.82f, 1f, 1.12f), 1f, 1f, new Color(.32f, .74f, 1f), 2.7f);
+                    AddWaterway(shader, "stream", 8f, StreamDepth, new Color(.95f, 1.15f, 1.03f), 1.15f, 1.35f, new Color(.36f, .9f, .87f), 2.1f);
+                    AddWaterway(shader, "seasonal stream", 3f, SeasonalStreamDepth, new Color(1.38f, 1.1f, .72f), .62f, .7f, new Color(.66f, .84f, .94f), 1.5f);
+                }
+                else
+                    Debug.LogWarning("The procedural water shader is missing.", this);
+            }
+            if (HasChannels(_spawn.Tile)) CreateStartingTerrain();
+            _tiles.Add(_spawn.Tile, _startingTerrain);
+            AttachRoutes(_spawn.Tile, _startingTerrain);
+            InstallSites(_spawn.Tile, _startingTerrain);
         }
 
         public Vector3 SpawnPosition => GetSpawnPosition(Vector2.zero, 1f);
@@ -118,7 +140,7 @@ namespace KeepDriving
             Vector2Int key = _spawn.Tile;
             float x = Mathf.Clamp((float)(_spawn.East - key.x * TileSize) + offset.x, 0, TileSize);
             float z = Mathf.Clamp((float)(_spawn.North - key.y * TileSize) + offset.y, 0, TileSize);
-            float height = _sourceData.GetInterpolatedHeight(x / TileSize, z / TileSize);
+            float height = _startingTerrain.GetPosition().y - _origin.y + _startingTerrain.terrainData.GetInterpolatedHeight(x / TileSize, z / TileSize);
             return _origin + TileOffset(key - _originTile) + new Vector3(x, height + heightOffset, z);
         }
 
@@ -126,7 +148,12 @@ namespace KeepDriving
 
         public Vector2Int? GetTile(Vector3 point) => HasSource ? WorldTile(point) : null;
 
-        internal void DrawMapRoads(Rect map, Rect world) => _roads?.DrawMap(map, world);
+        internal void DrawMapRoutes(Rect map, Rect world)
+        {
+            _roads?.DrawMap(map, world, new Color(.91f, .72f, .48f), 2f);
+            foreach (var water in _waterways)
+                water.Surface.DrawMap(map, world, water.MapColor, water.MapWidth);
+        }
 
         internal YanorraMap.Elevation MapElevation => _elevation;
 
@@ -210,8 +237,9 @@ namespace KeepDriving
                 {
                     Terrain terrain = CreateTile(_pendingKey, completed.Result);
                     _tiles.Add(_pendingKey, terrain);
+
+                    AttachRoutes(_pendingKey, terrain);
                     InstallSites(_pendingKey, terrain);
-                    AttachRoad(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
             }
@@ -253,7 +281,7 @@ namespace KeepDriving
         {
             if (!HasSource || _tiles.ContainsKey(_spawn.Tile)) return;
             SetSourceTileLoaded(true);
-            _tiles.Add(_spawn.Tile, _source);
+            _tiles.Add(_spawn.Tile, _startingTerrain);
             RefreshNeighbors();
         }
 
@@ -264,9 +292,9 @@ namespace KeepDriving
         {
             var terrain = _tiles[key];
             _tiles.Remove(key);
-            if (terrain == _source)
+            if (terrain == _startingTerrain)
             {
-                _source.SetNeighbors(null, null, null, null);
+                _startingTerrain.SetNeighbors(null, null, null, null);
                 SetSourceTileLoaded(false);
             }
             else
@@ -278,9 +306,10 @@ namespace KeepDriving
         private void SetSourceTileLoaded(bool loaded)
         {
             // Keep the scene GameObject and any authored children alive.
-            _source.enabled = loaded;
-            _sourceCollider.enabled = loaded;
-            if (_roadSurfaces.TryGetValue(_source, out MeshFilter road)) road.gameObject.SetActive(loaded);
+            _startingTerrain.enabled = loaded;
+            _startingCollider.enabled = loaded;
+            if (_routeMeshes.TryGetValue(_startingTerrain, out var routes))
+                foreach (var route in routes) route.gameObject.SetActive(loaded);
         }
 
         private void RefreshNeighbors()
@@ -363,11 +392,66 @@ namespace KeepDriving
             position.y = _baseY;
             tile.transform.position = position;
             var terrain = tile.GetComponent<Terrain>();
+            ConfigureTerrain(terrain);
+            return terrain;
+        }
+
+        private bool HasChannels(Vector2Int key)
+        {
+            foreach (var water in _waterways)
+                if (water.Surface.HasChannel(key)) return true;
+            return false;
+        }
+
+        private void CarveChannels(Vector2Int key, TerrainData data)
+        {
+            if (!HasChannels(key)) return;
+            int resolution = data.heightmapResolution;
+            var cuts = new float[resolution, resolution];
+            foreach (var water in _waterways)
+                water.Surface.AccumulateDepth(key, cuts);
+
+            var heights = data.GetHeights(0, 0, resolution, resolution);
+            float range = data.size.y;
+            for (int z = 0; z < resolution; z++)
+            for (int x = 0; x < resolution; x++)
+                heights[z, x] = Mathf.Max(0, heights[z, x] - cuts[z, x] / range);
+            data.SetHeights(0, 0, heights);
+        }
+
+        private void CreateStartingTerrain()
+        {
+            // A child terrain reserves space beneath zero while the scene's authored objects stay in place.
+            var data = Instantiate(_sourceData);
+            data.name = _sourceData.name + " (Runtime channels)";
+            data.size = new Vector3(TileSize, _sourceHeightSize + RiverDepth, TileSize);
+            int resolution = _sourceData.heightmapResolution;
+            var heights = new float[resolution, resolution];
+            for (int z = 0; z < resolution; z++)
+            for (int x = 0; x < resolution; x++)
+                heights[z, x] = (_sourceHeights[z, x] * _sourceHeightSize + RiverDepth) / data.size.y;
+            data.SetHeights(0, 0, heights);
+
+            GameObject tile = Terrain.CreateTerrainGameObject(data);
+            SceneManager.MoveGameObjectToScene(tile, gameObject.scene);
+            tile.name = "Starting terrain (Runtime channels)";
+            tile.layer = _source.gameObject.layer;
+            tile.transform.SetParent(_source.transform, false);
+            tile.transform.localPosition = Vector3.down * RiverDepth;
+            _startingTerrain = tile.GetComponent<Terrain>();
+            _startingCollider = tile.GetComponent<TerrainCollider>();
+            ConfigureTerrain(_startingTerrain);
+            _startingTerrain.drawTreesAndFoliage = _source.drawTreesAndFoliage;
+            _source.enabled = false;
+            _sourceCollider.enabled = false;
+        }
+
+        private void ConfigureTerrain(Terrain terrain)
+        {
             terrain.allowAutoConnect = false;
             terrain.drawInstanced = _source.drawInstanced;
             terrain.heightmapPixelError = _source.heightmapPixelError;
             terrain.materialTemplate = _source.materialTemplate;
-            return terrain;
         }
 
         private void InstallSites(Vector2Int key, Terrain terrain)
@@ -393,34 +477,67 @@ namespace KeepDriving
             }
         }
 
-        private void AttachRoad(Vector2Int key, Terrain terrain)
+        private void AddWaterway(Shader shader, string type, float width, float depth, Color tint, float ripples, float speed, Color mapColor, float mapWidth)
         {
-            Mesh mesh = _roads?.BuildTile(key, terrain.terrainData);
+            try
+            {
+                var surface = new RouteSurface(waterwaysGeoJson, "waterway_type", type, width, 2f, .14f, depth);
+                var material = new Material(shader) { name = type };
+                material.SetColor("_WaterTint", tint);
+                material.SetFloat("_RippleStrength", ripples);
+                material.SetFloat("_RippleSpeed", speed);
+                _waterways.Add((surface, material, type, mapColor, mapWidth));
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Could not load {type} features: {error.Message}", this);
+            }
+        }
+
+        private void AttachRoutes(Vector2Int key, Terrain terrain)
+        {
+
+            foreach (var water in _waterways)
+                AttachRoute(water.Surface, water.Material, water.Name, key, terrain);
+            // Sample the water surface on the original ground, then lower the bed beneath it.
+            CarveChannels(key, terrain.terrainData);
+            if (terrain == _startingTerrain && terrain != _source && terrain.terrainData.treeInstanceCount > 0)
+                terrain.terrainData.SetTreeInstances(terrain.terrainData.treeInstances, true);
+            AttachRoute(_roads, _roadMaterial, "Dirt roads", key, terrain);
+        }
+
+        private void AttachRoute(RouteSurface route, Material material, string name, Vector2Int key, Terrain terrain)
+        {
+            Mesh mesh = route?.BuildTile(key, terrain.terrainData);
             if (!mesh) return;
-            var surface = new GameObject("Dirt roads", typeof(MeshFilter), typeof(MeshRenderer));
+            var surface = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
             surface.transform.SetParent(terrain.transform, false);
             surface.layer = terrain.gameObject.layer;
             var filter = surface.GetComponent<MeshFilter>();
             filter.sharedMesh = mesh;
             var renderer = surface.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _roadMaterial;
+            renderer.sharedMaterial = material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            _roadSurfaces.Add(terrain, filter);
+            if (!_routeMeshes.TryGetValue(terrain, out var routes))
+                _routeMeshes.Add(terrain, routes = new List<MeshFilter>());
+            routes.Add(filter);
         }
 
-        private void RemoveRoad(Terrain terrain)
+        private void RemoveRoutes(Terrain terrain)
         {
-            if (_roadSurfaces.Remove(terrain, out MeshFilter road) && road)
+            if (!_routeMeshes.Remove(terrain, out var routes)) return;
+            foreach (var route in routes)
             {
-                Destroy(road.sharedMesh);
-                Destroy(road.gameObject);
+                if (!route) continue;
+                Destroy(route.sharedMesh);
+                Destroy(route.gameObject);
             }
         }
 
         private void DestroyTile(Terrain terrain)
         {
             if (!terrain) return;
-            RemoveRoad(terrain);
+            RemoveRoutes(terrain);
             terrain.gameObject.SetActive(false);
             Destroy(terrain.terrainData);
             Destroy(terrain.gameObject);
@@ -430,15 +547,18 @@ namespace KeepDriving
         {
             _shutdown.Cancel();
             _shutdown.Dispose();
-            if (_source)
-            {
-                _source.SetNeighbors(null, null, null, null);
-                if (_sourceCollider && gameObject.scene.isLoaded) SetSourceTileLoaded(true);
-            }
+            if (_startingTerrain) _startingTerrain.SetNeighbors(null, null, null, null);
             foreach (var terrain in _tiles.Values)
-                if (terrain != _source) DestroyTile(terrain);
-            RemoveRoad(_source);
+                if (terrain != _startingTerrain) DestroyTile(terrain);
+            if (_startingTerrain && _startingTerrain != _source) DestroyTile(_startingTerrain);
+            else if (_source) RemoveRoutes(_source);
+            if (_source && _sourceCollider && gameObject.scene.isLoaded)
+            {
+                _source.enabled = true;
+                _sourceCollider.enabled = true;
+            }
             if (_roadMaterial) Destroy(_roadMaterial);
+            foreach (var water in _waterways) Destroy(water.Material);
             if (_sitesRoot) Destroy(_sitesRoot);
         }
     }

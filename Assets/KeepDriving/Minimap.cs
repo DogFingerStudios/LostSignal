@@ -55,7 +55,7 @@ namespace KeepDriving
             if (terrainStream && terrainStream.HasSource)
             {
                 Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
-                terrainStream.DrawMapRoads(map, new Rect(mapCenter.x - Range * .5f, mapCenter.y - Range * .5f, Range, Range));
+                terrainStream.DrawMapRoutes(map, new Rect(mapCenter.x - Range * .5f, mapCenter.y - Range * .5f, Range, Range));
             }
             DrawNodes(scene, map, terrainStream);
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
