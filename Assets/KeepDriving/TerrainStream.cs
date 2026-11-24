@@ -28,9 +28,8 @@ namespace KeepDriving
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
         private readonly Dictionary<string, Node> _dishes = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Terrain, List<MeshFilter>> _routeMeshes = new();
-        private RouteSurface _roads;
         private readonly List<(RouteSurface Surface, Material Material, string Name, Color MapColor, float MapWidth)> _waterways = new();
-        private Material _roadMaterial;
+        private readonly List<(RouteSurface Surface, Material Material, string Name, Color MapColor, float MapWidth)> _landRoutes = new();
         private readonly List<GameObject> _roots = new();
         private readonly List<Vector2Int> _expired = new();
         private readonly CancellationTokenSource _shutdown = new();
@@ -96,16 +95,11 @@ namespace KeepDriving
             _source.allowAutoConnect = false;
             if (roadsGeoJson && dirtRoadShader)
             {
-                try
-                {
-                    _roads = new RouteSurface(roadsGeoJson, "route_type", "dirt road", 5f, 4f, .05f);
-                    _roadMaterial = new Material(dirtRoadShader) { name = "Dirt road", color = new Color(.42f, .26f, .15f) };
-                }
-                catch (Exception error)
-                {
-                    Debug.LogWarning($"Could not load dirt roads: {error.Message}", this);
-                }
+                AddLandRoute("dirt road", 5f, new Color(.42f, .26f, .15f), new Color(.91f, .72f, .48f), 2f);
+                AddLandRoute("service track", 3f, new Color(.43f, .42f, .36f), new Color(.82f, .78f, .65f), 1.7f);
+                AddLandRoute("footpath", 1.2f, new Color(.56f, .39f, .24f), new Color(.94f, .66f, .40f), 1.3f);
             }
+
             if (waterwaysGeoJson)
             {
                 var shader = Resources.Load<Shader>("ProceduralWater");
@@ -150,7 +144,8 @@ namespace KeepDriving
 
         internal void DrawMapRoutes(Rect map, Rect world)
         {
-            _roads?.DrawMap(map, world, new Color(.91f, .72f, .48f), 2f);
+            foreach (var route in _landRoutes)
+                route.Surface.DrawMap(map, world, route.MapColor, route.MapWidth);
             foreach (var water in _waterways)
                 water.Surface.DrawMap(map, world, water.MapColor, water.MapWidth);
         }
@@ -477,6 +472,20 @@ namespace KeepDriving
             }
         }
 
+        private void AddLandRoute(string type, float width, Color color, Color mapColor, float mapWidth)
+        {
+            try
+            {
+                var surface = new RouteSurface(roadsGeoJson, "route_type", type, width, 4f, .05f);
+                var material = new Material(dirtRoadShader) { name = type, color = color };
+                _landRoutes.Add((surface, material, type, mapColor, mapWidth));
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Could not load {type} features: {error.Message}", this);
+            }
+        }
+
         private void AddWaterway(Shader shader, string type, float width, float depth, Color tint, float ripples, float speed, Color mapColor, float mapWidth)
         {
             try
@@ -503,7 +512,8 @@ namespace KeepDriving
             CarveChannels(key, terrain.terrainData);
             if (terrain == _startingTerrain && terrain != _source && terrain.terrainData.treeInstanceCount > 0)
                 terrain.terrainData.SetTreeInstances(terrain.terrainData.treeInstances, true);
-            AttachRoute(_roads, _roadMaterial, "Dirt roads", key, terrain);
+            foreach (var route in _landRoutes)
+                AttachRoute(route.Surface, route.Material, route.Name, key, terrain);
         }
 
         private void AttachRoute(RouteSurface route, Material material, string name, Vector2Int key, Terrain terrain)
@@ -557,7 +567,7 @@ namespace KeepDriving
                 _source.enabled = true;
                 _sourceCollider.enabled = true;
             }
-            if (_roadMaterial) Destroy(_roadMaterial);
+            foreach (var route in _landRoutes) Destroy(route.Material);
             foreach (var water in _waterways) Destroy(water.Material);
             if (_sitesRoot) Destroy(_sitesRoot);
         }
