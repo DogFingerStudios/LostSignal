@@ -15,6 +15,8 @@ namespace KeepDriving
         [SerializeField] private TextAsset sitesGeoJson;
         [SerializeField] private TextAsset elevation;
         [SerializeField] private Node satelliteDish;
+        [SerializeField] private TextAsset roadsGeoJson;
+        [SerializeField] private Shader dirtRoadShader;
 
         private const int WindowRadius = 1;
         private const float OriginShiftDistance = 1600f;
@@ -22,6 +24,9 @@ namespace KeepDriving
 
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
         private readonly Dictionary<string, Node> _dishes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<Terrain, MeshFilter> _roadSurfaces = new();
+        private DirtRoads _roads;
+        private Material _roadMaterial;
         private readonly List<GameObject> _roots = new();
         private readonly List<Vector2Int> _expired = new();
         private readonly CancellationTokenSource _shutdown = new();
@@ -82,6 +87,19 @@ namespace KeepDriving
             _source.allowAutoConnect = false;
             _tiles.Add(_spawn.Tile, _source);
             InstallSites(_spawn.Tile, _source);
+            if (roadsGeoJson && dirtRoadShader)
+            {
+                try
+                {
+                    _roads = new DirtRoads(roadsGeoJson);
+                    _roadMaterial = new Material(dirtRoadShader) { name = "Dirt road", color = new Color(.42f, .26f, .15f) };
+                    AttachRoad(_spawn.Tile, _source);
+                }
+                catch (Exception error)
+                {
+                    Debug.LogWarning($"Could not load dirt roads: {error.Message}", this);
+                }
+            }
         }
 
         public Vector3 SpawnPosition => GetSpawnPosition(Vector2.zero, 1f);
@@ -107,6 +125,8 @@ namespace KeepDriving
         private static Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * TileSize, 0, tile.y * TileSize);
 
         public Vector2Int? GetTile(Vector3 point) => HasSource ? WorldTile(point) : null;
+
+        internal void DrawMapRoads(Rect map, Rect world) => _roads?.DrawMap(map, world);
 
         internal YanorraMap.Elevation MapElevation => _elevation;
 
@@ -191,6 +211,7 @@ namespace KeepDriving
                     Terrain terrain = CreateTile(_pendingKey, completed.Result);
                     _tiles.Add(_pendingKey, terrain);
                     InstallSites(_pendingKey, terrain);
+                    AttachRoad(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
             }
@@ -259,6 +280,7 @@ namespace KeepDriving
             // Keep the scene GameObject and any authored children alive.
             _source.enabled = loaded;
             _sourceCollider.enabled = loaded;
+            if (_roadSurfaces.TryGetValue(_source, out MeshFilter road)) road.gameObject.SetActive(loaded);
         }
 
         private void RefreshNeighbors()
@@ -371,9 +393,34 @@ namespace KeepDriving
             }
         }
 
-        private static void DestroyTile(Terrain terrain)
+        private void AttachRoad(Vector2Int key, Terrain terrain)
+        {
+            Mesh mesh = _roads?.BuildTile(key, terrain.terrainData);
+            if (!mesh) return;
+            var surface = new GameObject("Dirt roads", typeof(MeshFilter), typeof(MeshRenderer));
+            surface.transform.SetParent(terrain.transform, false);
+            surface.layer = terrain.gameObject.layer;
+            var filter = surface.GetComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            var renderer = surface.GetComponent<MeshRenderer>();
+            renderer.sharedMaterial = _roadMaterial;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _roadSurfaces.Add(terrain, filter);
+        }
+
+        private void RemoveRoad(Terrain terrain)
+        {
+            if (_roadSurfaces.Remove(terrain, out MeshFilter road) && road)
+            {
+                Destroy(road.sharedMesh);
+                Destroy(road.gameObject);
+            }
+        }
+
+        private void DestroyTile(Terrain terrain)
         {
             if (!terrain) return;
+            RemoveRoad(terrain);
             terrain.gameObject.SetActive(false);
             Destroy(terrain.terrainData);
             Destroy(terrain.gameObject);
@@ -390,6 +437,8 @@ namespace KeepDriving
             }
             foreach (var terrain in _tiles.Values)
                 if (terrain != _source) DestroyTile(terrain);
+            RemoveRoad(_source);
+            if (_roadMaterial) Destroy(_roadMaterial);
             if (_sitesRoot) Destroy(_sitesRoot);
         }
     }

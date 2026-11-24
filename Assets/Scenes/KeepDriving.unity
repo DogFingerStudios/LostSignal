@@ -604,6 +604,8 @@ MonoBehaviour:
   sitesGeoJson: {fileID: -5361536558798434828, guid: 98333611695de0c46a0d51f7db92a818, type: 3}
   elevation: {fileID: 4900000, guid: 40131b6c087b97148b0737afeb9eb347, type: 3}
   satelliteDish: {fileID: 1632660968447689461, guid: af30268d4ea29e347abcdf42f3b3d999, type: 3}
+  roadsGeoJson: {fileID: -5361536558798434828, guid: b45a0a0d046742a8a3167342f37adf0c, type: 3}
+  dirtRoadShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
 --- !u!1 &988729358
 GameObject:
   m_ObjectHideFlags: 0

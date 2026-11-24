@@ -91,7 +91,8 @@ namespace KeepDriving
         {
             var result = new Dictionary<Vector2Int, List<Point>>();
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var feature in ReadFeatures(asset))
+            var assets = ReadFeatures(asset);
+            foreach (var feature in assets)
             {
                 if (feature?.properties?.site_type != "Horizon Chain node") continue;
                 var point = new Point(feature);

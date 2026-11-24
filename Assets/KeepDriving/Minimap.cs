@@ -52,6 +52,11 @@ namespace KeepDriving
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "N ↑", right);
             GUI.DrawTexture(map, relief);
             DrawGrid(map);
+            if (terrainStream && terrainStream.HasSource)
+            {
+                Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
+                terrainStream.DrawMapRoads(map, new Rect(mapCenter.x - Range * .5f, mapCenter.y - Range * .5f, Range, Range));
+            }
             DrawNodes(scene, map, terrainStream);
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
 
