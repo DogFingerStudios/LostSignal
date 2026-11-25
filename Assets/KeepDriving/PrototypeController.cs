@@ -27,18 +27,13 @@ namespace KeepDriving
         TerminalScreen terminalScreen;
         Terminal activeTerminal;
         readonly Minimap minimap = new Minimap();
-        [SerializeField] private bool showSpawnedTileOutline = true;
-        [SerializeField, Min(0f), Tooltip("Show the yellow outline at this map width in kilometers or closer.")]
-        private float spawnedTileOutlineMaxWidthKm = 100f;
-        [SerializeField] private bool showSpawnedTileGrid = true;
-        [SerializeField, Min(0f), Tooltip("Show the individual tile lines at this map width in kilometers or closer.")]
-        private float spawnedTileGridMaxWidthKm = 12.5f;
-        readonly WorldMap worldMap = new WorldMap();
+        WorldMap worldMap;
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
         void Start()
         {
+            if (terrainStream) worldMap = terrainStream.GetComponent<WorldMap>();
             car.isKinematic = true;
             car.interpolation = RigidbodyInterpolation.Interpolate;
             if (terrainStream && terrainStream.HasSource)
@@ -87,7 +82,7 @@ namespace KeepDriving
                 }
                 return;
             }
-            if (worldMap.IsOpen)
+            if (worldMap && worldMap.IsOpen)
             {
                 if (keys != null && (keys.mKey.wasPressedThisFrame || keys.escapeKey.wasPressedThisFrame))
                 {
@@ -107,9 +102,8 @@ namespace KeepDriving
                 UnlockCursor();
                 return;
             }
-            if (keys?.mKey.wasPressedThisFrame == true && terrainStream && terrainStream.HasSource)
+            if (keys?.mKey.wasPressedThisFrame == true && worldMap && worldMap.TryOpen())
             {
-                worldMap.Open(terrainStream);
                 if (horn.isPlaying) horn.Stop();
                 UnlockCursor();
                 return;
@@ -409,7 +403,6 @@ namespace KeepDriving
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
             minimap.Dispose();
-            worldMap.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
         }
 
@@ -421,18 +414,11 @@ namespace KeepDriving
                 return;
             }
 
-            if (worldMap.IsOpen)
+            if (worldMap && worldMap.IsOpen)
             {
                 if (Event.current.type == EventType.Repaint)
                 {
-                    bool showTileOutline = worldMap.WidthKm <= spawnedTileOutlineMaxWidthKm;
-                    bool showTileGrid = worldMap.WidthKm <= spawnedTileGridMaxWidthKm;
-
-                    // Draw(TerrainStream stream, Vector3 player, bool showSpawnedTileOutline, bool showSpawnedTileGrid, float heading)
-                    worldMap.Draw(terrainStream, 
-                        driving ? car.position : player.transform.position,
-                        showTileOutline,
-                        showTileGrid,
+                    worldMap.Draw(driving ? car.position : player.transform.position,
                         driving ? car.rotation.eulerAngles.y : yaw);
                 }
 
@@ -488,6 +474,6 @@ namespace KeepDriving
         }
 
         bool WaitingForTerrain => terrainStream != null && terrainStream.HasSource && !terrainStream.InitialWindowReady;
-        bool ModalOpen => worldMap.IsOpen || fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
+        bool ModalOpen => (worldMap && worldMap.IsOpen) || fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
     }
 }

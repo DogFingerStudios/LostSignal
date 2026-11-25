@@ -1,10 +1,22 @@
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace KeepDriving
 {
-    internal sealed class WorldMap
+    [DisallowMultipleComponent]
+    [RequireComponent(typeof(TerrainStream))]
+    public sealed class WorldMap : MonoBehaviour
     {
+        [SerializeField] private bool showSpawnedTileOutline = true;
+        [SerializeField, Min(0f), Tooltip("Show the yellow outline at this map width in kilometers or closer.")]
+        private float spawnedTileOutlineMaxWidthKm = 100f;
+        [SerializeField] private bool showSpawnedTileGrid = true;
+        [SerializeField, Min(0f), Tooltip("Show the individual tile lines at this map width in kilometers or closer.")]
+        private float spawnedTileGridMaxWidthKm = 12.5f;
+
+        private TerrainStream _stream;
         private const int Resolution = 512;
         private const float MinSpan = 10f;
         private static readonly Color Panel = new(.06f, .10f, .10f);
@@ -19,22 +31,59 @@ namespace KeepDriving
         private static readonly Rect FullWorld = new(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize);
         private Texture2D _terrain, _zoomTerrain, _playerArrow;
         private Rect _zoomBounds;
+        private readonly CancellationTokenSource _shutdown = new();
+        private Task<Color32[]> _preparingTerrain;
+        private bool _terrainPreparationFailed;
         private float _span = YanorraMap.WorldSize;
         private GUIStyle _label, _title, _centered;
 
         public bool IsOpen { get; private set; }
         public float WidthKm => _span / 1000f;
 
-        public void Open(TerrainStream stream)
+        private void Awake() => _stream = GetComponent<TerrainStream>();
+
+        private void Start()
         {
-            stream.CollectWorldMapSites(_mapSites);
-            _sceneNodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
-            if (!_terrain)
+            if (_stream.HasSource) PrepareTerrain();
+        }
+
+        private void OnDisable() => Close();
+
+        private void PrepareTerrain()
+        {
+            if (_terrain || _preparingTerrain != null || _terrainPreparationFailed) return;
+            var elevation = _stream.MapElevation;
+            var woodland = _stream.MapWoodland;
+            var token = _shutdown.Token;
+            _preparingTerrain = Task.Run(() => BuildTerrainPixels(elevation, FullWorld, Resolution, woodland, token), token);
+        }
+
+        private void Update()
+        {
+            if (_preparingTerrain?.IsCompleted != true) return;
+            var completed = _preparingTerrain;
+            _preparingTerrain = null;
+            if (completed.IsFaulted)
             {
-                _terrain = CreateTerrainTexture("Yanorra world map");
-                UpdateTerrain(_terrain, stream.MapElevation, FullWorld, stream.MapWoodland);
+                _terrainPreparationFailed = true;
+                Debug.LogException(completed.Exception);
+                return;
             }
+            if (completed.IsCanceled) return;
+
+            _terrain = CreateTerrainTexture("Yanorra world map");
+            _terrain.SetPixels32(completed.Result);
+            _terrain.Apply(false, true);
+        }
+
+        public bool TryOpen()
+        {
+            if (!isActiveAndEnabled || !_stream.HasSource) return false;
+            _stream.CollectWorldMapSites(_mapSites);
+            _sceneNodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
+            PrepareTerrain();
             IsOpen = true;
+            return true;
         }
 
         public void Close() => IsOpen = false;
@@ -62,7 +111,7 @@ namespace KeepDriving
             return _zoomTerrain;
         }
 
-        public void Draw(TerrainStream stream, Vector3 player, bool showSpawnedTileOutline, bool showSpawnedTileGrid, float heading)
+        public void Draw(Vector3 player, float heading)
         {
             if (_label == null)
             {
@@ -78,10 +127,18 @@ namespace KeepDriving
             var map = new Rect((Screen.width - size) * .5f, (Screen.height - size) * .5f + 6f, size, size);
             Fill(new Rect(map.x - 16, map.y - 42, size + 32, size + 88), Panel);
             Fill(new Rect(map.x - 1, map.y - 1, size + 2, size + 2), Border);
-            Vector2 playerPosition = stream.ToMapPosition(player);
+            if (!_terrain)
+            {
+                Fill(map, Panel);
+                string message = _terrainPreparationFailed ? "World map unavailable" : "Preparing map…";
+                GUI.Label(map, message, _centered);
+                GUI.Label(new Rect(map.xMax - 78, map.yMax + 10, 78, 26), "M / Esc close", _label);
+                return;
+            }
+            Vector2 playerPosition = _stream.ToMapPosition(player);
             Rect world = GetView(playerPosition);
-            GUI.DrawTexture(map, GetTerrain(stream, world));
-            stream.DrawMapRoutes(map, world);
+            GUI.DrawTexture(map, GetTerrain(_stream, world));
+            _stream.DrawMapRoutes(map, world);
             GUI.Label(new Rect(map.x, map.y - 40, size, 35), "YANORRA", _title);
             string span = _span >= 1000f ? $"{_span / 1000f:0.##} km" : $"{_span:0.#} m";
             GUI.Label(new Rect(map.xMax - 104, map.y - 36, 104, 24), span + " wide", _label);
@@ -91,15 +148,17 @@ namespace KeepDriving
                 if (Contains(world, position)) DrawNode(Project(position, map, world));
             foreach (var node in _sceneNodes)
             {
-                if (!node || node.gameObject.scene != stream.gameObject.scene || stream.IsSpawnedMapSite(node)) continue;
-                Vector2 position = stream.ToMapPosition(node.transform.position);
+                if (!node || node.gameObject.scene != _stream.gameObject.scene || _stream.IsSpawnedMapSite(node)) continue;
+                Vector2 position = _stream.ToMapPosition(node.transform.position);
                 if (Contains(world, position)) DrawNode(Project(position, map, world));
             }
 
-            stream.DrawMapWaterBodies(map, world);
-            if (showSpawnedTileOutline || showSpawnedTileGrid)
+            _stream.DrawMapWaterBodies(map, world);
+            bool showOutline = showSpawnedTileOutline && WidthKm <= spawnedTileOutlineMaxWidthKm;
+            bool showGrid = showSpawnedTileGrid && WidthKm <= spawnedTileGridMaxWidthKm;
+            if (showOutline || showGrid)
             {
-                HighlightSpawnedTiles(stream, map, world, showSpawnedTileOutline, showSpawnedTileGrid);
+                HighlightSpawnedTiles(_stream, map, world, showOutline, showGrid);
             }
 
             if (!_playerArrow)
@@ -198,12 +257,21 @@ namespace KeepDriving
 
         internal static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world, WoodlandBiomes woodland)
         {
-            int resolution = texture.width;
+            texture.SetPixels32(BuildTerrainPixels(elevation, world, texture.width, woodland, CancellationToken.None));
+            texture.Apply(false);
+        }
+
+        private static Color32[] BuildTerrainPixels(YanorraMap.Elevation elevation, Rect world, int resolution,
+            WoodlandBiomes woodland, CancellationToken token)
+        {
             var heights = new float[resolution * resolution];
             float step = world.width / resolution;
             for (int z = 0; z < resolution; z++)
-            for (int x = 0; x < resolution; x++)
-                heights[z * resolution + x] = elevation.Sample(world.xMin + (x + .5) * step, world.yMin + (z + .5) * step);
+            {
+                token.ThrowIfCancellationRequested();
+                for (int x = 0; x < resolution; x++)
+                    heights[z * resolution + x] = elevation.Sample(world.xMin + (x + .5) * step, world.yMin + (z + .5) * step);
+            }
 
             var pixels = new Color32[heights.Length];
             var lowland = new Color(.21f, .38f, .31f);
@@ -235,12 +303,13 @@ namespace KeepDriving
             }
 
             woodland?.ShadeMap(pixels, resolution, world);
-            texture.SetPixels32(pixels);
-            texture.Apply(false);
+            return pixels;
         }
 
-        public void Dispose()
+        private void OnDestroy()
         {
+            _shutdown.Cancel();
+            _shutdown.Dispose();
             if (_terrain) Object.Destroy(_terrain);
             if (_zoomTerrain) Object.Destroy(_zoomTerrain);
             if (_playerArrow) Object.Destroy(_playerArrow);

@@ -539,6 +539,7 @@ GameObject:
   - component: {fileID: 919439683}
   - component: {fileID: 919439684}
   - component: {fileID: 919439685}
+  - component: {fileID: 919439686}
   m_Layer: 0
   m_Name: Terrain (Paintable Rolling Hills)
   m_TagString: Untagged
@@ -660,6 +661,22 @@ MonoBehaviour:
   - {fileID: 1214657917099862, guid: 78f6b68ad931a824c920d7b953612370, type: 3}
   - {fileID: 1743353957770956, guid: 4663d5cca4ed98548946e758cd5979e2, type: 3}
   streamingGridSize: 3
+--- !u!114 &919439686
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 919439676}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 30d81bf4c33b1c24f9951eaf3eeb8190, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.WorldMap
+  showSpawnedTileOutline: 1
+  spawnedTileOutlineMaxWidthKm: 50
+  showSpawnedTileGrid: 1
+  spawnedTileGridMaxWidthKm: 12.5
 --- !u!1 &988729358
 GameObject:
   m_ObjectHideFlags: 0
@@ -695,10 +712,6 @@ MonoBehaviour:
   car: {fileID: 245214888}
   view: {fileID: 63276286}
   horn: {fileID: 245214887}
-  showSpawnedTileOutline: 1
-  spawnedTileOutlineMaxWidthKm: 50
-  showSpawnedTileGrid: 1
-  spawnedTileGridMaxWidthKm: 12.5
 --- !u!4 &988729360
 Transform:
   m_ObjectHideFlags: 0
