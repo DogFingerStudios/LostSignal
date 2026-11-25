@@ -174,7 +174,7 @@ namespace KeepDriving
             relief.Apply(false);
         }
 
-        static Texture2D CreateIcon(string name, bool isArrow)
+        internal static Texture2D CreateIcon(string name, bool isArrow)
         {
             const int size = 32;
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
@@ -195,7 +195,7 @@ namespace KeepDriving
             return texture;
         }
 
-        static void DrawIcon(Texture2D texture, Vector2 point, float size, float angle, Color tint)
+        internal static void DrawIcon(Texture2D texture, Vector2 point, float size, float angle, Color tint)
         {
             var matrix = GUI.matrix;
             var color = GUI.color;

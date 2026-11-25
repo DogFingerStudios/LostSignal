@@ -418,7 +418,8 @@ namespace KeepDriving
             if (worldMap.IsOpen)
             {
                 if (Event.current.type == EventType.Repaint)
-                    worldMap.Draw(terrainStream, driving ? car.position : player.transform.position);
+                    worldMap.Draw(terrainStream, driving ? car.position : player.transform.position,
+                        driving ? car.rotation.eulerAngles.y : yaw);
                 return;
             }
 

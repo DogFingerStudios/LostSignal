@@ -4,8 +4,6 @@
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32631" } },
 "xy_coordinate_resolution": 1e-08,
 "features": [
-{ "type": "Feature", "properties": { "id": "{ad99f648-4e71-4828-9a85-d366efa82a3c}", "name": "Henna River", "waterway_type": "river", "width_m": 50.0, "notes": null }, "geometry": { "type": "LineString", "coordinates": [ [ 71661.28065596, 102711.02420054 ], [ 72267.60249504, 102693.78282123 ], [ 72448.6369778, 102676.54144192 ], [ 72721.62548354, 102728.26557985 ], [ 72891.16571343, 102871.94374077 ], [ 73021.69409907, 102935.85058943 ], [ 73103.80939159, 103075.96672928 ], [ 73178.2779666, 103148.52420054 ], [ 73215.87835711, 103288.61040744 ] ] } },
-{ "type": "Feature", "properties": { "id": "{689d8554-a563-4267-bf54-c4625767f7f5}", "name": "Henna Stream", "waterway_type": "stream", "width_m": 25.0, "notes": null }, "geometry": { "type": "LineString", "coordinates": [ [ 72301.87572301, 102811.985739 ], [ 72615.04345805, 102879.76084584 ], [ 72762.27903497, 103122.8164014 ] ] } },
-{ "type": "Feature", "properties": { "id": "{3b241837-a071-452c-8b4b-e981ccf3a298}", "name": "Henna Seasonal Stream", "waterway_type": "seasonal stream", "width_m": 5.0, "notes": null }, "geometry": { "type": "LineString", "coordinates": [ [ 72736.57123583, 102351.58242704 ], [ 72844.07657771, 102606.32334584 ], [ 73147.89602215, 102711.49161507 ] ] } }
+
 ]
 }

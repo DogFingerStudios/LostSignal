@@ -14,7 +14,7 @@ namespace KeepDriving
         private readonly List<Vector2> _mapSites = new();
         private Node[] _sceneNodes;
         private static readonly Rect FullWorld = new(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize);
-        private Texture2D _terrain, _zoomTerrain;
+        private Texture2D _terrain, _zoomTerrain, _playerArrow;
         private Rect _zoomBounds;
         private float _span = YanorraMap.WorldSize;
         private GUIStyle _label, _title, _centered;
@@ -58,7 +58,7 @@ namespace KeepDriving
             return _zoomTerrain;
         }
 
-        public void Draw(TerrainStream stream, Vector3 player)
+        public void Draw(TerrainStream stream, Vector3 player, float heading)
         {
             if (_label == null)
             {
@@ -92,17 +92,15 @@ namespace KeepDriving
                 if (Contains(world, position)) DrawNode(Project(position, map, world));
             }
 
-            Vector2 playerMarker = Project(playerPosition, map, world);
-            Fill(new Rect(playerMarker.x - 7, playerMarker.y - 7, 14, 14), Panel, 7);
-            Fill(new Rect(playerMarker.x - 5, playerMarker.y - 5, 10, 10), PlayerColor, 5);
-
             stream.DrawMapWaterBodies(map, world);
+            if (!_playerArrow) _playerArrow = Minimap.CreateIcon("World map player arrow", true);
+            Minimap.DrawIcon(_playerArrow, Project(playerPosition, map, world), 18f, heading, PlayerColor);
 
             DrawNode(new Vector2(map.x + 6, map.yMax + 23));
             GUI.Label(new Rect(map.x + 16, map.yMax + 10, 144, 26), "Horizon Chain node", _label);
             if (size >= 300)
             {
-                Fill(new Rect(map.x + 156, map.yMax + 19, 8, 8), PlayerColor, 4);
+                Minimap.DrawIcon(_playerArrow, new Vector2(map.x + 160, map.yMax + 23), 12f, 0f, PlayerColor);
                 GUI.Label(new Rect(map.x + 168, map.yMax + 10, 75, 26), "You", _label);
             }
             if (size >= 420)
@@ -178,6 +176,7 @@ namespace KeepDriving
         {
             if (_terrain) Object.Destroy(_terrain);
             if (_zoomTerrain) Object.Destroy(_zoomTerrain);
+            if (_playerArrow) Object.Destroy(_playerArrow);
         }
     }
 }

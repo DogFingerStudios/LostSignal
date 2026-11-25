@@ -14,7 +14,7 @@ namespace KeepDriving
         private readonly List<(Vector2 A, Vector2 B)> _edges = new();
         private readonly List<Vector2[]> _strips = new();
         private readonly Rect _bounds;
-        private readonly float _level, _depth;
+        private readonly float _level, _depth, _shoreSlopeWidth;
         private Texture2D _mapTexture;
 
         public Material Material { get; }
@@ -54,6 +54,7 @@ namespace KeepDriving
         {
             Name = name;
             _depth = type == "lake" ? 10f : 5f;
+            _shoreSlopeWidth = type == "lake" ? 20f : 15f;
             var elevations = new SortedSet<float>();
             Vector2 min = Vector2.one * float.PositiveInfinity;
             Vector2 max = Vector2.one * float.NegativeInfinity;
@@ -161,7 +162,7 @@ namespace KeepDriving
             {
                 Vector2 point = origin + new Vector2(x * cell, z * cell);
                 if (!Contains(point, out float shoreDistance)) continue;
-                float bed = _level + .04f - _depth * Mathf.SmoothStep(0f, 1f, shoreDistance / 4f);
+                float bed = _level + .04f - _depth * Mathf.SmoothStep(0f, 1f, shoreDistance / _shoreSlopeWidth);
                 float cut = tileY + heights[z, x] * range - bed;
                 cuts[z, x] = cuts[z, x] == 0f ? cut : Mathf.Max(cuts[z, x], cut);
             }
