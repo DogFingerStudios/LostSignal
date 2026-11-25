@@ -22,6 +22,11 @@ namespace KeepDriving
         [SerializeField] private TextAsset waterwaysGeoJson;
         [SerializeField] private TextAsset waterBodiesGeoJson;
 
+        [Header("Woodland")]
+        [SerializeField] private TextAsset biomesGeoJson;
+        [SerializeField, Tooltip("Tree prefabs used inside Woodland polygons.")]
+        private GameObject[] woodlandTreePrefabs = Array.Empty<GameObject>();
+
         [SerializeField, Min(1), Tooltip("Tiles per side, including the player's tile. Even values round up so the grid stays centered.")]
         private int streamingGridSize = 5;
 
@@ -58,7 +63,9 @@ namespace KeepDriving
         private static readonly ProfilerMarker UnloadTilesMarker = new("TerrainStream.UnloadTiles");
         private static readonly ProfilerMarker AttachRoutesMarker = new("TerrainStream.AttachRoutes");
         private static readonly ProfilerMarker CarveWaterMarker = new("TerrainStream.CarveWater");
-        private Task<(float[,] Ground, float[,] Carved)> _pendingHeights;
+        private WoodlandBiomes _woodland;
+        private TreePrototype[] _woodlandPrototypes;
+        private Task<(float[,] Ground, float[,] Carved, TreeInstance[] Trees)> _pendingHeights;
         private Vector2Int _pendingKey;
         private float _retryAfter;
 
@@ -125,9 +132,12 @@ namespace KeepDriving
                 if (!shader)
                     Debug.LogWarning("The procedural water shader is missing.", this);
             }
-            if (HasWater(_spawn.Tile)) CreateStartingTerrain();
+            LoadWoodland();
+            var startingTrees = PrepareWoodland(_spawn.Tile, CancellationToken.None);
+            if (HasWater(_spawn.Tile) || startingTrees is { Length: > 0 }) CreateStartingTerrain();
             _tiles.Add(_spawn.Tile, _startingTerrain);
             AttachRoutes(_spawn.Tile, _startingTerrain, carveStartingTerrain: true);
+            InstallWoodland(_startingTerrain, startingTrees);
             InstallSites(_spawn.Tile, _startingTerrain);
         }
 
@@ -170,6 +180,7 @@ namespace KeepDriving
         }
 
         internal YanorraMap.Elevation MapElevation => _elevation;
+        internal WoodlandBiomes MapWoodland => _woodland;
 
         internal void CollectLoadedTiles(HashSet<Vector2Int> tiles)
         {
@@ -260,11 +271,12 @@ namespace KeepDriving
                 else if (!completed.IsCanceled && Contains(_pendingKey, min, max))
                 {
                     using var sample = InstallTileMarker.Auto();
-                    var (ground, carved) = completed.Result;
+                    var (ground, carved, trees) = completed.Result;
                     Terrain terrain = CreateTile(_pendingKey, ground);
                     _tiles.Add(_pendingKey, terrain);
 
                     AttachRoutes(_pendingKey, terrain, carved);
+                    InstallWoodland(terrain, trees);
                     InstallSites(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
@@ -351,24 +363,25 @@ namespace KeepDriving
 
         private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out var terrain) ? terrain : null;
 
-        private (float[,] Ground, float[,] Carved) PrepareTile(Vector2Int key, CancellationToken token)
+        private (float[,] Ground, float[,] Carved, TreeInstance[] Trees) PrepareTile(Vector2Int key, CancellationToken token)
         {
             using var sample = PrepareTileMarker.Auto();
             var ground = SampleTile(key, token);
             token.ThrowIfCancellationRequested();
-            if (!HasWater(key)) return (ground, null);
+            var trees = PrepareWoodland(key, token);
+            if (!HasWater(key)) return (ground, null, trees);
 
             foreach (var water in _waterways)
             {
                 if (!water.Surface.HasChannel(key)) continue;
                 var carved = (float[,])ground.Clone();
                 CarveWater(key, _baseY, _heightRange, carved);
-                return (ground, carved);
+                return (ground, carved, trees);
             }
 
             // Lake meshes have their own waterline and need no original terrain upload.
             CarveWater(key, _baseY, _heightRange, ground);
-            return (ground, null);
+            return (ground, null, trees);
         }
 
         private float[,] SampleTile(Vector2Int key, CancellationToken token)
@@ -526,6 +539,69 @@ namespace KeepDriving
                 dish.name = point.Name;
                 _dishes.Add(point.Id, dish);
             }
+        }
+
+        private void LoadWoodland()
+        {
+            if (!biomesGeoJson) return;
+            var prototypes = new List<TreePrototype>();
+            foreach (GameObject prefab in woodlandTreePrefabs ?? Array.Empty<GameObject>())
+                if (prefab && !prefab.scene.IsValid()) prototypes.Add(new TreePrototype { prefab = prefab });
+
+            try
+            {
+                _woodland = new WoodlandBiomes(biomesGeoJson, prototypes.Count);
+                _woodlandPrototypes = prototypes.ToArray();
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Could not load woodland biomes: {error.Message}", this);
+            }
+        }
+
+        private TreeInstance[] PrepareWoodland(Vector2Int key, CancellationToken token)
+        {
+            if (_woodland == null || _woodlandPrototypes.Length == 0 || !_woodland.OverlapsTile(key)) return null;
+            var spawn = new Vector2((float)_spawn.East, (float)_spawn.North);
+            return _woodland.GenerateTile(key, point =>
+            {
+                if ((point - spawn).sqrMagnitude < 12f * 12f) return true;
+                foreach (var water in _waterways)
+                    if (water.Surface.ContainsChannel(key, point)) return true;
+                foreach (var body in _waterBodies)
+                    if (body.ContainsPoint(point)) return true;
+                return false;
+            }, token);
+        }
+
+        private void InstallWoodland(Terrain terrain, TreeInstance[] trees)
+        {
+            if (trees == null || trees.Length == 0) return;
+            TerrainData data = terrain.terrainData;
+            var existingPrototypes = data.treePrototypes;
+            var prototypes = new List<TreePrototype>(existingPrototypes);
+            var indices = new int[_woodlandPrototypes.Length];
+            for (int i = 0; i < _woodlandPrototypes.Length; i++)
+            {
+                TreePrototype prototype = _woodlandPrototypes[i];
+                int index = prototypes.FindIndex(item => item.prefab == prototype.prefab);
+                if (index < 0)
+                {
+                    index = prototypes.Count;
+                    prototypes.Add(prototype);
+                }
+                indices[i] = index;
+            }
+
+            var instances = new List<TreeInstance>(data.treeInstances);
+            foreach (var generated in trees)
+            {
+                var instance = generated;
+                instance.prototypeIndex = indices[generated.prototypeIndex];
+                instances.Add(instance);
+            }
+            data.treePrototypes = prototypes.ToArray();
+            data.SetTreeInstances(instances.ToArray(), true);
         }
 
         private void AddLandRoute(string type, float width, Color color, Color mapColor, float mapWidth)

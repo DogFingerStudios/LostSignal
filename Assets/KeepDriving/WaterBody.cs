@@ -211,6 +211,15 @@ namespace KeepDriving
             }
         }
 
+        public bool ContainsPoint(Vector2 point)
+        {
+            if (!_bounds.Contains(point)) return false;
+            bool inside = false;
+            foreach (var (a, b) in _edges)
+                if (Crosses(a, b, point.y) && point.x < EastAt(a, b, point.y)) inside = !inside;
+            return inside;
+        }
+
         private bool Contains(Vector2 point, out float shoreDistance)
         {
             bool inside = false;

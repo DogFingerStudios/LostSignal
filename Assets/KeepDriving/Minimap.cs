@@ -54,7 +54,7 @@ namespace KeepDriving
                 var elevation = terrainStream.MapElevation;
                 if (world != reliefBounds || elevation != reliefElevation)
                 {
-                    WorldMap.UpdateTerrain(relief, elevation, world);
+                    WorldMap.UpdateTerrain(relief, elevation, world, terrainStream.MapWoodland);
                     reliefBounds = world;
                     reliefElevation = elevation;
                 }

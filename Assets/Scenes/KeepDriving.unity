@@ -654,6 +654,11 @@ MonoBehaviour:
   dirtRoadShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
   waterwaysGeoJson: {fileID: -5361536558798434828, guid: 57909429f75a4967850430d957b95990, type: 3}
   waterBodiesGeoJson: {fileID: -5361536558798434828, guid: c5aee8aae86b949119aca11bad34b692, type: 3}
+  biomesGeoJson: {fileID: -5361536558798434828, guid: 5370fcaf164ee6e4c91ea3e5ffd8c5dd, type: 3}
+  woodlandTreePrefabs:
+  - {fileID: 1364922359172550, guid: 1aaf3ef80841d9c4990a27fee328eb1c, type: 3}
+  - {fileID: 1214657917099862, guid: 78f6b68ad931a824c920d7b953612370, type: 3}
+  - {fileID: 1743353957770956, guid: 4663d5cca4ed98548946e758cd5979e2, type: 3}
   streamingGridSize: 3
 --- !u!1 &988729358
 GameObject:

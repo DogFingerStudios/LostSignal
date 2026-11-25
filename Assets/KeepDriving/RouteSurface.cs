@@ -171,6 +171,22 @@ namespace KeepDriving
 
         public bool HasChannel(Vector2Int key) => _channels.ContainsKey(key);
 
+        public bool ContainsChannel(Vector2Int key, Vector2 point)
+        {
+            if (!_channels.TryGetValue(key, out var channels)) return false;
+            foreach (var channel in channels)
+            {
+                Vector2 delta = channel.End - channel.Start;
+                float lengthSquared = delta.sqrMagnitude;
+                if (lengthSquared <= 0f) continue;
+                Vector2 offset = point - channel.Start;
+                float along = Mathf.Clamp01(Vector2.Dot(offset, delta) / lengthSquared);
+                if ((offset - delta * along).sqrMagnitude < channel.Radius * channel.Radius)
+                    return true;
+            }
+            return false;
+        }
+
         public void AccumulateDepth(Vector2Int key, float[,] cut)
         {
             if (!_channels.TryGetValue(key, out var channels)) return;

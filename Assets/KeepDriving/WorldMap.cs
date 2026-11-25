@@ -32,7 +32,7 @@ namespace KeepDriving
             if (!_terrain)
             {
                 _terrain = CreateTerrainTexture("Yanorra world map");
-                UpdateTerrain(_terrain, stream.MapElevation, FullWorld);
+                UpdateTerrain(_terrain, stream.MapElevation, FullWorld, stream.MapWoodland);
             }
             IsOpen = true;
         }
@@ -50,13 +50,13 @@ namespace KeepDriving
                 Mathf.Clamp(player.y - _span * .5f, 0f, maxOrigin), _span, _span);
         }
 
-        private Texture2D GetTerrain(YanorraMap.Elevation elevation, Rect world)
+        private Texture2D GetTerrain(TerrainStream stream, Rect world)
         {
             if (world == FullWorld) return _terrain;
             if (!_zoomTerrain) _zoomTerrain = CreateTerrainTexture("Yanorra zoomed terrain");
             if (_zoomBounds != world)
             {
-                UpdateTerrain(_zoomTerrain, elevation, world);
+                UpdateTerrain(_zoomTerrain, stream.MapElevation, world, stream.MapWoodland);
                 _zoomBounds = world;
             }
             return _zoomTerrain;
@@ -80,7 +80,7 @@ namespace KeepDriving
             Fill(new Rect(map.x - 1, map.y - 1, size + 2, size + 2), Border);
             Vector2 playerPosition = stream.ToMapPosition(player);
             Rect world = GetView(playerPosition);
-            GUI.DrawTexture(map, GetTerrain(stream.MapElevation, world));
+            GUI.DrawTexture(map, GetTerrain(stream, world));
             stream.DrawMapRoutes(map, world);
             GUI.Label(new Rect(map.x, map.y - 40, size, 35), "YANORRA", _title);
             string span = _span >= 1000f ? $"{_span / 1000f:0.##} km" : $"{_span:0.#} m";
@@ -196,7 +196,7 @@ namespace KeepDriving
                 filterMode = FilterMode.Bilinear
             };
 
-        internal static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world)
+        internal static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world, WoodlandBiomes woodland)
         {
             int resolution = texture.width;
             var heights = new float[resolution * resolution];
@@ -234,6 +234,7 @@ namespace KeepDriving
                 pixels[i] = new Color(color.r * shade, color.g * shade, color.b * shade);
             }
 
+            woodland?.ShadeMap(pixels, resolution, world);
             texture.SetPixels32(pixels);
             texture.Apply(false);
         }
