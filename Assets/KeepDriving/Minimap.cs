@@ -15,25 +15,23 @@ namespace KeepDriving
         static readonly Color Text = new(.75f, .83f, .79f);
         static readonly Color Amber = new(1f, .71f, .31f);
         static readonly Color Mint = new(.64f, 1f, .8f);
-        static readonly Color Lowland = new(.13f, .22f, .19f);
-        static readonly Color Highland = new(.43f, .52f, .40f);
         static readonly Color Unmapped = new(.08f, .13f, .12f);
 
-        readonly Color32[] pixels = new Color32[Resolution * Resolution];
         Texture2D relief, arrow, diamond;
         GUIStyle left, right;
         readonly List<Vector3> mapSites = new();
         Node[] nodes = System.Array.Empty<Node>();
         Vector2 center;
         float range = 300f;
-        float nextNodeScan, nextReliefRefresh;
+        float nextNodeScan;
+        Rect reliefBounds;
+        YanorraMap.Elevation reliefElevation;
 
         public void Zoom(int direction)
         {
             float nextRange = Mathf.Clamp(direction > 0 ? range * .5f : range * 2f, MinRange, MaxRange);
             if (nextRange == range) return;
             range = nextRange;
-            nextReliefRefresh = 0f;
         }
 
         public void Draw(Scene scene, Vector3 position, float heading, TerrainStream terrainStream)
@@ -46,12 +44,20 @@ namespace KeepDriving
             }
 
             float panStep = Mathf.Min(PanStep, range / 20f);
-            var newCenter = new Vector2(Mathf.Round(position.x / panStep), Mathf.Round(position.z / panStep)) * panStep;
-            if (newCenter != center || Time.unscaledTime >= nextReliefRefresh)
+            center = new Vector2(Mathf.Round(position.x / panStep), Mathf.Round(position.z / panStep)) * panStep;
+            bool hasMap = terrainStream && terrainStream.HasSource;
+            Rect world = default;
+            if (hasMap)
             {
-                center = newCenter;
-                UpdateRelief(scene);
-                nextReliefRefresh = Time.unscaledTime + 1f;
+                Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
+                world = new Rect(mapCenter.x - range * .5f, mapCenter.y - range * .5f, range, range);
+                var elevation = terrainStream.MapElevation;
+                if (world != reliefBounds || elevation != reliefElevation)
+                {
+                    WorldMap.UpdateTerrain(relief, elevation, world);
+                    reliefBounds = world;
+                    reliefElevation = elevation;
+                }
             }
 
             float size = Mathf.Clamp(Screen.height * .29f, 120, 220);
@@ -61,12 +67,11 @@ namespace KeepDriving
             Fill(new Rect(frame.x + 1, frame.y + 1, frame.width - 2, frame.height - 2), Frame);
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "LOCAL TERRAIN", left);
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "N ↑", right);
-            GUI.DrawTexture(map, relief);
+            if (hasMap) GUI.DrawTexture(map, relief);
+            else Fill(map, Unmapped);
             DrawGrid(map);
-            if (terrainStream && terrainStream.HasSource)
+            if (hasMap)
             {
-                Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
-                var world = new Rect(mapCenter.x - range * .5f, mapCenter.y - range * .5f, range, range);
                 terrainStream.DrawMapWaterBodies(map, world);
                 terrainStream.DrawMapRoutes(map, world);
             }
@@ -130,48 +135,12 @@ namespace KeepDriving
 
         void Initialize()
         {
-            relief = new Texture2D(Resolution, Resolution, TextureFormat.RGBA32, false)
-            {
-                name = "Minimap relief", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear
-            };
+            relief = WorldMap.CreateTerrainTexture("Minimap relief", Resolution);
             arrow = CreateIcon("Minimap arrow", true);
             diamond = CreateIcon("Minimap node", false);
             left = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold };
             left.normal.textColor = Text;
             right = new GUIStyle(left) { alignment = TextAnchor.MiddleRight };
-        }
-
-        void UpdateRelief(Scene scene)
-        {
-            System.Array.Fill(pixels, (Color32)Unmapped);
-            float west = center.x - range * .5f;
-            float south = center.y - range * .5f;
-            float step = range / Resolution;
-            foreach (Terrain terrain in Terrain.activeTerrains)
-            {
-                if (terrain.gameObject.scene != scene || !terrain.terrainData) continue;
-                var data = terrain.terrainData;
-                Vector3 origin = terrain.GetPosition();
-                Vector3 size = data.size;
-                // Only sample the rectangle occupied by each loaded terrain tile.
-                int xMin = Mathf.Max(0, Mathf.CeilToInt((origin.x - west) / step - .5f));
-                int zMin = Mathf.Max(0, Mathf.CeilToInt((origin.z - south) / step - .5f));
-                int xMax = Mathf.Min(Resolution, Mathf.CeilToInt((origin.x + size.x - west) / step - .5f));
-                int zMax = Mathf.Min(Resolution, Mathf.CeilToInt((origin.z + size.z - south) / step - .5f));
-                for (int z = zMin; z < zMax; z++)
-                for (int x = xMin; x < xMax; x++)
-                {
-                    float u = (west + (x + .5f) * step - origin.x) / size.x;
-                    float v = (south + (z + .5f) * step - origin.z) / size.z;
-                    float height = origin.y + data.GetInterpolatedHeight(u, v);
-                    Color color = Color.Lerp(Lowland, Highland, Mathf.InverseLerp(-3, 22, height));
-                    float band = Mathf.Repeat(height, 3f);
-                    float contour = 1 - Mathf.SmoothStep(0f, 1f, Mathf.Min(band, 3f - band) / .24f);
-                    pixels[z * Resolution + x] = Color.Lerp(color, Frame, contour * .38f);
-                }
-            }
-            relief.SetPixels32(pixels);
-            relief.Apply(false);
         }
 
         internal static Texture2D CreateIcon(string name, bool isArrow)

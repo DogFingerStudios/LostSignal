@@ -4,6 +4,6 @@
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32631" } },
 "xy_coordinate_resolution": 1e-08,
 "features": [
-{ "type": "Feature", "properties": { "id": "{551036da-1e9b-45e6-8afd-6ebe43df0daf}", "name": "Player spawn", "heading_deg": 0.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 72567.05872375, 103034.52981673 ] } }
+{ "type": "Feature", "properties": { "id": "{551036da-1e9b-45e6-8afd-6ebe43df0daf}", "name": "Player spawn", "heading_deg": 0.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74298.95683556, 101494.38862669 ] } }
 ]
 }

@@ -219,7 +219,7 @@ namespace KeepDriving
             Vector3 forward = Vector3.ProjectOnPlane(car.rotation * Vector3.forward, Vector3.up).normalized;
             carVelocity = CarMotion.Step(carVelocity, forward, input.y, driving && ShiftHeld, braking, Time.fixedDeltaTime);
             speed = Vector3.Dot(carVelocity, forward);
-            float heading = car.rotation.eulerAngles.y + input.x * 65f * Mathf.Clamp(speed / 5f, -1, 1) * Time.fixedDeltaTime;
+            float heading = car.rotation.eulerAngles.y + input.x * 85f * Mathf.Clamp(speed / 5f, -1, 1) * Time.fixedDeltaTime;
             Quaternion flat = Quaternion.Euler(0, heading, 0);
             Vector3 next = car.position + carVelocity * Time.fixedDeltaTime;
             skidding = driving && braking && carVelocity.magnitude > 5;

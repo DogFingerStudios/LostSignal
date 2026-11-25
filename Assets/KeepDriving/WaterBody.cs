@@ -148,23 +148,66 @@ namespace KeepDriving
 
         public bool OverlapsTile(Vector2Int key) => _bounds.Overlaps(new Rect(TileOrigin(key), Vector2.one * TileSize));
 
-        public void AccumulateCut(Vector2Int key, TerrainData terrain, float tileY, float[,] heights, float[,] cuts)
+        public void AccumulateCut(Vector2Int key, float tileY, float range, float[,] heights, float[,] cuts)
         {
             if (!OverlapsTile(key)) return;
             int last = heights.GetLength(0) - 1;
             float cell = TileSize / (float)last;
-            float range = terrain.size.y;
             Vector2 origin = TileOrigin(key);
-            for (int z = Mathf.Max(0, Mathf.CeilToInt((_bounds.yMin - origin.y) / cell));
-                z <= Mathf.Min(last, Mathf.FloorToInt((_bounds.yMax - origin.y) / cell)); z++)
-            for (int x = Mathf.Max(0, Mathf.CeilToInt((_bounds.xMin - origin.x) / cell));
-                x <= Mathf.Min(last, Mathf.FloorToInt((_bounds.xMax - origin.x) / cell)); x++)
+            int minX = Mathf.Max(0, Mathf.CeilToInt((_bounds.xMin - origin.x) / cell));
+            int maxX = Mathf.Min(last, Mathf.FloorToInt((_bounds.xMax - origin.x) / cell));
+            int minZ = Mathf.Max(0, Mathf.CeilToInt((_bounds.yMin - origin.y) / cell));
+            int maxZ = Mathf.Min(last, Mathf.FloorToInt((_bounds.yMax - origin.y) / cell));
+            if (minX > maxX || minZ > maxZ) return;
+
+            int columns = maxX - minX + 1;
+            float radius = _shoreSlopeWidth;
+            float radiusSquared = radius * radius;
+            var shore = new float[(maxZ - minZ + 1) * columns];
+
+            // Only rasterize distances where a shoreline edge can affect the bank slope.
+            foreach (var (a, b) in _edges)
             {
-                Vector2 point = origin + new Vector2(x * cell, z * cell);
-                if (!Contains(point, out float shoreDistance)) continue;
-                float bed = _level + .04f - _depth * Mathf.SmoothStep(0f, 1f, shoreDistance / _shoreSlopeWidth);
-                float cut = tileY + heights[z, x] * range - bed;
-                cuts[z, x] = cuts[z, x] == 0f ? cut : Mathf.Max(cuts[z, x], cut);
+                int x0 = Mathf.Max(minX, Mathf.CeilToInt((Mathf.Min(a.x, b.x) - radius - origin.x) / cell));
+                int x1 = Mathf.Min(maxX, Mathf.FloorToInt((Mathf.Max(a.x, b.x) + radius - origin.x) / cell));
+                int z0 = Mathf.Max(minZ, Mathf.CeilToInt((Mathf.Min(a.y, b.y) - radius - origin.y) / cell));
+                int z1 = Mathf.Min(maxZ, Mathf.FloorToInt((Mathf.Max(a.y, b.y) + radius - origin.y) / cell));
+                Vector2 delta = b - a;
+                float lengthSquared = delta.sqrMagnitude;
+                for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                {
+                    var offset = origin + new Vector2(x * cell, z * cell) - a;
+                    float along = Mathf.Clamp01(Vector2.Dot(offset, delta) / lengthSquared);
+                    float influence = 1f - (offset - delta * along).sqrMagnitude / radiusSquared;
+                    int i = (z - minZ) * columns + x - minX;
+                    shore[i] = Mathf.Max(shore[i], influence);
+                }
+            }
+
+            var crossings = new List<float>();
+            for (int z = minZ; z <= maxZ; z++)
+            {
+                float north = origin.y + z * cell;
+                crossings.Clear();
+                foreach (var (a, b) in _edges)
+                    if (Crosses(a, b, north)) crossings.Add(EastAt(a, b, north));
+                crossings.Sort();
+
+                // An inclusive left edge and exclusive right edge match the polygon parity test.
+                int crossing = 0;
+                for (int x = minX; x <= maxX && crossing < crossings.Count; x++)
+                {
+                    float east = origin.x + x * cell;
+                    while (crossing < crossings.Count && east >= crossings[crossing]) crossing++;
+                    if ((crossing & 1) == 0) continue;
+
+                    float influence = shore[(z - minZ) * columns + x - minX];
+                    float shoreFraction = Mathf.Sqrt(1f - influence);
+                    float bed = _level + .04f - _depth * Mathf.SmoothStep(0f, 1f, shoreFraction);
+                    float cut = tileY + heights[z, x] * range - bed;
+                    cuts[z, x] = cuts[z, x] == 0f ? cut : Mathf.Max(cuts[z, x], cut);
+                }
             }
         }
 

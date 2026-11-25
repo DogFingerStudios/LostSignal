@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -22,7 +23,7 @@ namespace KeepDriving
         [SerializeField] private TextAsset waterBodiesGeoJson;
 
         [SerializeField, Min(1), Tooltip("Tiles per side, including the player's tile. Even values round up so the grid stays centered.")]
-        private int streamingGridSize = 3;
+        private int streamingGridSize = 5;
 
         private int WindowRadius => Mathf.Max(1, streamingGridSize) / 2;
         private const float OriginShiftDistance = 1600f;
@@ -52,7 +53,12 @@ namespace KeepDriving
         private float[,] _sourceHeights;
         private float _datumOffset, _baseY, _heightRange, _sourceHeightSize;
         private GameObject _sitesRoot;
-        private Task<float[,]> _pendingHeights;
+        private static readonly ProfilerMarker PrepareTileMarker = new("TerrainStream.PrepareTile");
+        private static readonly ProfilerMarker InstallTileMarker = new("TerrainStream.InstallTile");
+        private static readonly ProfilerMarker UnloadTilesMarker = new("TerrainStream.UnloadTiles");
+        private static readonly ProfilerMarker AttachRoutesMarker = new("TerrainStream.AttachRoutes");
+        private static readonly ProfilerMarker CarveWaterMarker = new("TerrainStream.CarveWater");
+        private Task<(float[,] Ground, float[,] Carved)> _pendingHeights;
         private Vector2Int _pendingKey;
         private float _retryAfter;
 
@@ -121,7 +127,7 @@ namespace KeepDriving
             }
             if (HasWater(_spawn.Tile)) CreateStartingTerrain();
             _tiles.Add(_spawn.Tile, _startingTerrain);
-            AttachRoutes(_spawn.Tile, _startingTerrain);
+            AttachRoutes(_spawn.Tile, _startingTerrain, carveStartingTerrain: true);
             InstallSites(_spawn.Tile, _startingTerrain);
         }
 
@@ -235,9 +241,12 @@ namespace KeepDriving
             foreach (var entry in _tiles)
                 if (!Contains(entry.Key, min, max))
                     _expired.Add(entry.Key);
-            foreach (var key in _expired)
-                UnloadTile(key);
-            if (_expired.Count > 0) RefreshNeighbors();
+            if (_expired.Count > 0)
+            {
+                using var sample = UnloadTilesMarker.Auto();
+                foreach (var key in _expired) UnloadTile(key);
+                RefreshNeighbors();
+            }
 
             if (_pendingHeights?.IsCompleted == true)
             {
@@ -250,10 +259,12 @@ namespace KeepDriving
                 }
                 else if (!completed.IsCanceled && Contains(_pendingKey, min, max))
                 {
-                    Terrain terrain = CreateTile(_pendingKey, completed.Result);
+                    using var sample = InstallTileMarker.Auto();
+                    var (ground, carved) = completed.Result;
+                    Terrain terrain = CreateTile(_pendingKey, ground);
                     _tiles.Add(_pendingKey, terrain);
 
-                    AttachRoutes(_pendingKey, terrain);
+                    AttachRoutes(_pendingKey, terrain, carved);
                     InstallSites(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
@@ -289,7 +300,7 @@ namespace KeepDriving
 
             _pendingKey = requested;
             CancellationToken token = _shutdown.Token;
-            _pendingHeights = Task.Run(() => SampleTile(requested, token), token);
+            _pendingHeights = Task.Run(() => PrepareTile(requested, token), token);
         }
 
         public void RestoreSourceTile()
@@ -339,6 +350,26 @@ namespace KeepDriving
         }
 
         private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out var terrain) ? terrain : null;
+
+        private (float[,] Ground, float[,] Carved) PrepareTile(Vector2Int key, CancellationToken token)
+        {
+            using var sample = PrepareTileMarker.Auto();
+            var ground = SampleTile(key, token);
+            token.ThrowIfCancellationRequested();
+            if (!HasWater(key)) return (ground, null);
+
+            foreach (var water in _waterways)
+            {
+                if (!water.Surface.HasChannel(key)) continue;
+                var carved = (float[,])ground.Clone();
+                CarveWater(key, _baseY, _heightRange, carved);
+                return (ground, carved);
+            }
+
+            // Lake meshes have their own waterline and need no original terrain upload.
+            CarveWater(key, _baseY, _heightRange, ground);
+            return (ground, null);
+        }
 
         private float[,] SampleTile(Vector2Int key, CancellationToken token)
         {
@@ -423,23 +454,20 @@ namespace KeepDriving
             return false;
         }
 
-        private void CarveWater(Vector2Int key, Terrain terrain)
+        private void CarveWater(Vector2Int key, float tileY, float range, float[,] heights)
         {
-            if (!HasWater(key)) return;
-            TerrainData data = terrain.terrainData;
-            int resolution = data.heightmapResolution;
+            using var sample = CarveWaterMarker.Auto();
+            int resolution = heights.GetLength(0);
             var cuts = new float[resolution, resolution];
             foreach (var water in _waterways)
                 water.Surface.AccumulateDepth(key, cuts);
 
-            var heights = data.GetHeights(0, 0, resolution, resolution);
             foreach (var body in _waterBodies)
-                body.AccumulateCut(key, data, terrain.GetPosition().y, heights, cuts);
-            float range = data.size.y;
+                body.AccumulateCut(key, tileY, range, heights, cuts);
+
             for (int z = 0; z < resolution; z++)
             for (int x = 0; x < resolution; x++)
                 heights[z, x] = Mathf.Clamp01(heights[z, x] - cuts[z, x] / range);
-            data.SetHeights(0, 0, heights);
         }
 
         private void CreateStartingTerrain()
@@ -545,14 +573,22 @@ namespace KeepDriving
             }
         }
 
-        private void AttachRoutes(Vector2Int key, Terrain terrain)
+        private void AttachRoutes(Vector2Int key, Terrain terrain, float[,] carved = null, bool carveStartingTerrain = false)
         {
+            using var sample = AttachRoutesMarker.Auto();
             foreach (var body in _waterBodies)
                 AttachSurface(body.BuildTile(key, terrain.GetPosition().y), body.Material, body.Name, terrain);
             foreach (var water in _waterways)
                 AttachSurface(water.Surface.BuildTile(key, terrain.terrainData), water.Material, water.Name, terrain);
             // Sample the water surface on the original ground, then lower the bed beneath it.
-            CarveWater(key, terrain);
+            var data = terrain.terrainData;
+            if (carveStartingTerrain && HasWater(key))
+            {
+                int resolution = data.heightmapResolution;
+                carved = data.GetHeights(0, 0, resolution, resolution);
+                CarveWater(key, terrain.GetPosition().y, data.size.y, carved);
+            }
+            if (carved != null) data.SetHeights(0, 0, carved);
             if (terrain == _startingTerrain && terrain != _source && terrain.terrainData.treeInstanceCount > 0)
                 terrain.terrainData.SetTreeInstances(terrain.terrainData.treeInstances, true);
             foreach (var route in _landRoutes)

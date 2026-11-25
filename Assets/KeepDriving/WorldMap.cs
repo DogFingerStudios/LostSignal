@@ -188,21 +188,22 @@ namespace KeepDriving
         private static void Fill(Rect rect, Color color, float radius = 0f) =>
             GUI.DrawTexture(rect, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, color, 0f, radius);
 
-        private static Texture2D CreateTerrainTexture(string name) =>
-            new(Resolution, Resolution, TextureFormat.RGBA32, false)
+        internal static Texture2D CreateTerrainTexture(string name, int resolution = Resolution) =>
+            new(resolution, resolution, TextureFormat.RGBA32, false)
             {
                 name = name,
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear
             };
 
-        private static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world)
+        internal static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world)
         {
-            var heights = new float[Resolution * Resolution];
-            float step = world.width / Resolution;
-            for (int z = 0; z < Resolution; z++)
-            for (int x = 0; x < Resolution; x++)
-                heights[z * Resolution + x] = elevation.Sample(world.xMin + (x + .5) * step, world.yMin + (z + .5) * step);
+            int resolution = texture.width;
+            var heights = new float[resolution * resolution];
+            float step = world.width / resolution;
+            for (int z = 0; z < resolution; z++)
+            for (int x = 0; x < resolution; x++)
+                heights[z * resolution + x] = elevation.Sample(world.xMin + (x + .5) * step, world.yMin + (z + .5) * step);
 
             var pixels = new Color32[heights.Length];
             var lowland = new Color(.21f, .38f, .31f);
@@ -210,15 +211,22 @@ namespace KeepDriving
             var peaks = new Color(.87f, .80f, .66f);
             var light = new Vector3(-.55f, .73f, .40f).normalized;
             var range = Mathf.Max(1, elevation.Max - elevation.Min);
-            for (int z = 0; z < Resolution; z++)
-            for (int x = 0; x < Resolution; x++)
+            for (int z = 0; z < resolution; z++)
+            for (int x = 0; x < resolution; x++)
             {
-                int i = z * Resolution + x;
+                int i = z * resolution + x;
+                double mapX = world.xMin + (x + .5) * step;
+                double mapZ = world.yMin + (z + .5) * step;
+                if (mapX < 0 || mapX > YanorraMap.WorldSize || mapZ < 0 || mapZ > YanorraMap.WorldSize)
+                {
+                    pixels[i] = new Color32(20, 33, 31, 255);
+                    continue;
+                }
                 float height = Mathf.Clamp01((heights[i] - elevation.Min) / range);
-                float east = heights[z * Resolution + Mathf.Min(x + 1, Resolution - 1)] -
-                    heights[z * Resolution + Mathf.Max(x - 1, 0)];
-                float north = heights[Mathf.Min(z + 1, Resolution - 1) * Resolution + x] -
-                    heights[Mathf.Max(z - 1, 0) * Resolution + x];
+                float east = heights[z * resolution + Mathf.Min(x + 1, resolution - 1)] -
+                    heights[z * resolution + Mathf.Max(x - 1, 0)];
+                float north = heights[Mathf.Min(z + 1, resolution - 1) * resolution + x] -
+                    heights[Mathf.Max(z - 1, 0) * resolution + x];
                 var normal = new Vector3(-east * 18f, 2f * step, -north * 18f).normalized;
                 float shade = .68f + .39f * Mathf.Clamp01(Vector3.Dot(normal, light));
                 Color color = height < .55f ? Color.Lerp(lowland, upland, height / .55f)
