@@ -608,6 +608,7 @@ MonoBehaviour:
   roadsGeoJson: {fileID: -5361536558798434828, guid: b45a0a0d046742a8a3167342f37adf0c, type: 3}
   dirtRoadShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
   waterwaysGeoJson: {fileID: -5361536558798434828, guid: 57909429f75a4967850430d957b95990, type: 3}
+  waterBodiesGeoJson: {fileID: -5361536558798434828, guid: c5aee8aae86b949119aca11bad34b692, type: 3}
 --- !u!1 &988729358
 GameObject:
   m_ObjectHideFlags: 0

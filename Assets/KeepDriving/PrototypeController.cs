@@ -64,6 +64,8 @@ namespace KeepDriving
             if (terrainStream) terrainStream.Pump(driving ? car.position : player.transform.position);
             if (WaitingForTerrain) return;
             var keys = Keyboard.current;
+            int zoom = (keys?.equalsKey.wasPressedThisFrame == true ? 1 : 0)
+                - (keys?.minusKey.wasPressedThisFrame == true ? 1 : 0);
             if (terminalScreen?.IsOpen == true)
             {
                 if (!activeTerminal || !activeTerminal.isActiveAndEnabled || keys?.escapeKey.wasPressedThisFrame == true)
@@ -86,6 +88,7 @@ namespace KeepDriving
                     worldMap.Close();
                     LockCursor();
                 }
+                else if (zoom != 0) worldMap.Zoom(zoom);
                 return;
             }
             if (keys != null && keys.iKey.wasPressedThisFrame)
@@ -135,6 +138,8 @@ namespace KeepDriving
                     return;
                 }
             }
+
+            if (!driving && zoom != 0) minimap.Zoom(zoom);
 
             Vector2 look = mouse != null ? mouse.delta.ReadValue() * .12f : Vector2.zero;
             yaw += look.x;
@@ -424,7 +429,7 @@ namespace KeepDriving
 
             GUI.Box(new Rect(16, 16, 650, 80), driving
                 ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   M world map"
-                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   M world map");
+                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   M world map   ·   = / - minimap zoom");
 
             if (driving)
             {

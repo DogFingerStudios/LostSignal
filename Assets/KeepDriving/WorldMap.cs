@@ -6,13 +6,17 @@ namespace KeepDriving
     internal sealed class WorldMap
     {
         private const int Resolution = 512;
+        private const float MinSpan = 10f;
         private static readonly Color Panel = new(.06f, .10f, .10f);
         private static readonly Color Border = new(.35f, .46f, .43f);
         private static readonly Color NodeColor = new(1f, .72f, .29f);
         private static readonly Color PlayerColor = new(.42f, 1f, .92f);
         private readonly List<Vector2> _mapSites = new();
         private Node[] _sceneNodes;
-        private Texture2D _terrain;
+        private static readonly Rect FullWorld = new(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize);
+        private Texture2D _terrain, _zoomTerrain;
+        private Rect _zoomBounds;
+        private float _span = YanorraMap.WorldSize;
         private GUIStyle _label, _title, _centered;
 
         public bool IsOpen { get; private set; }
@@ -21,11 +25,38 @@ namespace KeepDriving
         {
             stream.CollectWorldMapSites(_mapSites);
             _sceneNodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
-            if (!_terrain) _terrain = BuildTerrain(stream.MapElevation);
+            if (!_terrain)
+            {
+                _terrain = CreateTerrainTexture("Yanorra world map");
+                UpdateTerrain(_terrain, stream.MapElevation, FullWorld);
+            }
             IsOpen = true;
         }
 
         public void Close() => IsOpen = false;
+
+        public void Zoom(int direction) =>
+            _span = Mathf.Clamp(direction > 0 ? _span * .5f : _span * 2f, MinSpan, YanorraMap.WorldSize);
+
+        private Rect GetView(Vector2 player)
+        {
+            if (_span == YanorraMap.WorldSize) return FullWorld;
+            float maxOrigin = YanorraMap.WorldSize - _span;
+            return new Rect(Mathf.Clamp(player.x - _span * .5f, 0f, maxOrigin),
+                Mathf.Clamp(player.y - _span * .5f, 0f, maxOrigin), _span, _span);
+        }
+
+        private Texture2D GetTerrain(YanorraMap.Elevation elevation, Rect world)
+        {
+            if (world == FullWorld) return _terrain;
+            if (!_zoomTerrain) _zoomTerrain = CreateTerrainTexture("Yanorra zoomed terrain");
+            if (_zoomBounds != world)
+            {
+                UpdateTerrain(_zoomTerrain, elevation, world);
+                _zoomBounds = world;
+            }
+            return _zoomTerrain;
+        }
 
         public void Draw(TerrainStream stream, Vector3 player)
         {
@@ -43,23 +74,29 @@ namespace KeepDriving
             var map = new Rect((Screen.width - size) * .5f, (Screen.height - size) * .5f + 6f, size, size);
             Fill(new Rect(map.x - 16, map.y - 42, size + 32, size + 88), Panel);
             Fill(new Rect(map.x - 1, map.y - 1, size + 2, size + 2), Border);
-            GUI.DrawTexture(map, _terrain);
-            stream.DrawMapRoutes(map, new Rect(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize));
+            Vector2 playerPosition = stream.ToMapPosition(player);
+            Rect world = GetView(playerPosition);
+            GUI.DrawTexture(map, GetTerrain(stream.MapElevation, world));
+            stream.DrawMapRoutes(map, world);
             GUI.Label(new Rect(map.x, map.y - 40, size, 35), "YANORRA", _title);
-            GUI.Label(new Rect(map.xMax - 86, map.y - 36, 86, 24), "200 × 200 km", _label);
+            string span = _span >= 1000f ? $"{_span / 1000f:0.##} km" : $"{_span:0.#} m";
+            GUI.Label(new Rect(map.xMax - 104, map.y - 36, 104, 24), span + " wide", _label);
             GUI.Label(new Rect(map.xMax - 32, map.y + 8, 24, 20), "N ↑", _centered);
 
             foreach (var position in _mapSites)
-                DrawNode(Project(position, map));
+                if (Contains(world, position)) DrawNode(Project(position, map, world));
             foreach (var node in _sceneNodes)
             {
                 if (!node || node.gameObject.scene != stream.gameObject.scene || stream.IsSpawnedMapSite(node)) continue;
-                DrawNode(Project(stream.ToMapPosition(node.transform.position), map));
+                Vector2 position = stream.ToMapPosition(node.transform.position);
+                if (Contains(world, position)) DrawNode(Project(position, map, world));
             }
 
-            Vector2 playerMarker = Project(stream.ToMapPosition(player), map);
+            Vector2 playerMarker = Project(playerPosition, map, world);
             Fill(new Rect(playerMarker.x - 7, playerMarker.y - 7, 14, 14), Panel, 7);
             Fill(new Rect(playerMarker.x - 5, playerMarker.y - 5, 10, 10), PlayerColor, 5);
+
+            stream.DrawMapWaterBodies(map, world);
 
             DrawNode(new Vector2(map.x + 6, map.yMax + 23));
             GUI.Label(new Rect(map.x + 16, map.yMax + 10, 144, 26), "Horizon Chain node", _label);
@@ -68,13 +105,18 @@ namespace KeepDriving
                 Fill(new Rect(map.x + 156, map.yMax + 19, 8, 8), PlayerColor, 4);
                 GUI.Label(new Rect(map.x + 168, map.yMax + 10, 75, 26), "You", _label);
             }
+            if (size >= 420)
+                GUI.Label(new Rect(map.xMax - 175, map.yMax + 10, 95, 26), "= / - zoom", _label);
             GUI.Label(new Rect(map.xMax - 78, map.yMax + 10, 78, 26), "M / Esc close", _label);
         }
 
-        private static Vector2 Project(Vector2 position, Rect map)
+        private static bool Contains(Rect world, Vector2 point) =>
+            point.x >= world.xMin && point.x <= world.xMax && point.y >= world.yMin && point.y <= world.yMax;
+
+        private static Vector2 Project(Vector2 position, Rect map, Rect world)
         {
-            float east = Mathf.Clamp01(position.x / YanorraMap.WorldSize);
-            float north = Mathf.Clamp01(position.y / YanorraMap.WorldSize);
+            float east = Mathf.Clamp01((position.x - world.xMin) / world.width);
+            float north = Mathf.Clamp01((position.y - world.yMin) / world.height);
             return new Vector2(map.x + east * map.width, map.yMax - north * map.height);
         }
 
@@ -90,13 +132,21 @@ namespace KeepDriving
         private static void Fill(Rect rect, Color color, float radius = 0f) =>
             GUI.DrawTexture(rect, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, color, 0f, radius);
 
-        private static Texture2D BuildTerrain(YanorraMap.Elevation elevation)
+        private static Texture2D CreateTerrainTexture(string name) =>
+            new(Resolution, Resolution, TextureFormat.RGBA32, false)
+            {
+                name = name,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+        private static void UpdateTerrain(Texture2D texture, YanorraMap.Elevation elevation, Rect world)
         {
             var heights = new float[Resolution * Resolution];
-            float step = (float)YanorraMap.WorldSize / Resolution;
+            float step = world.width / Resolution;
             for (int z = 0; z < Resolution; z++)
             for (int x = 0; x < Resolution; x++)
-                heights[z * Resolution + x] = elevation.Sample((x + .5f) * step, (z + .5f) * step);
+                heights[z * Resolution + x] = elevation.Sample(world.xMin + (x + .5) * step, world.yMin + (z + .5) * step);
 
             var pixels = new Color32[heights.Length];
             var lowland = new Color(.21f, .38f, .31f);
@@ -120,20 +170,14 @@ namespace KeepDriving
                 pixels[i] = new Color(color.r * shade, color.g * shade, color.b * shade);
             }
 
-            var texture = new Texture2D(Resolution, Resolution, TextureFormat.RGBA32, false)
-            {
-                name = "Yanorra world map",
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
-            };
             texture.SetPixels32(pixels);
-            texture.Apply(false, true);
-            return texture;
+            texture.Apply(false);
         }
 
         public void Dispose()
         {
             if (_terrain) Object.Destroy(_terrain);
+            if (_zoomTerrain) Object.Destroy(_zoomTerrain);
         }
     }
 }

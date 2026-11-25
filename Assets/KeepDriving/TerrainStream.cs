@@ -19,6 +19,7 @@ namespace KeepDriving
         [SerializeField] private TextAsset roadsGeoJson;
         [SerializeField] private Shader dirtRoadShader;
         [SerializeField] private TextAsset waterwaysGeoJson;
+        [SerializeField] private TextAsset waterBodiesGeoJson;
 
         private const int WindowRadius = 1;
         private const float OriginShiftDistance = 1600f;
@@ -30,6 +31,8 @@ namespace KeepDriving
         private readonly Dictionary<Terrain, List<MeshFilter>> _routeMeshes = new();
         private readonly List<(RouteSurface Surface, Material Material, string Name, Color MapColor, float MapWidth)> _waterways = new();
         private readonly List<(RouteSurface Surface, Material Material, string Name, Color MapColor, float MapWidth)> _landRoutes = new();
+        private readonly List<WaterBody> _waterBodies = new();
+        private readonly List<Rect> _waterMapMarkers = new();
         private readonly List<GameObject> _roots = new();
         private readonly List<Vector2Int> _expired = new();
         private readonly CancellationTokenSource _shutdown = new();
@@ -100,19 +103,20 @@ namespace KeepDriving
                 AddLandRoute("footpath", 1.2f, new Color(.56f, .39f, .24f), new Color(.94f, .66f, .40f), 1.3f);
             }
 
-            if (waterwaysGeoJson)
+            if (waterwaysGeoJson || waterBodiesGeoJson)
             {
                 var shader = Resources.Load<Shader>("ProceduralWater");
-                if (shader)
+                if (shader) LoadWaterBodies(shader);
+                if (shader && waterwaysGeoJson)
                 {
                     AddWaterway(shader, "river", 30f, RiverDepth, new Color(.82f, 1f, 1.12f), 1f, 1f, new Color(.32f, .74f, 1f), 2.7f);
                     AddWaterway(shader, "stream", 8f, StreamDepth, new Color(.95f, 1.15f, 1.03f), 1.15f, 1.35f, new Color(.36f, .9f, .87f), 2.1f);
                     AddWaterway(shader, "seasonal stream", 3f, SeasonalStreamDepth, new Color(1.38f, 1.1f, .72f), .62f, .7f, new Color(.66f, .84f, .94f), 1.5f);
                 }
-                else
+                if (!shader)
                     Debug.LogWarning("The procedural water shader is missing.", this);
             }
-            if (HasChannels(_spawn.Tile)) CreateStartingTerrain();
+            if (HasWater(_spawn.Tile)) CreateStartingTerrain();
             _tiles.Add(_spawn.Tile, _startingTerrain);
             AttachRoutes(_spawn.Tile, _startingTerrain);
             InstallSites(_spawn.Tile, _startingTerrain);
@@ -148,6 +152,12 @@ namespace KeepDriving
                 route.Surface.DrawMap(map, world, route.MapColor, route.MapWidth);
             foreach (var water in _waterways)
                 water.Surface.DrawMap(map, world, water.MapColor, water.MapWidth);
+        }
+
+        internal void DrawMapWaterBodies(Rect map, Rect world)
+        {
+            _waterMapMarkers.Clear();
+            foreach (var body in _waterBodies) body.DrawMap(map, world, _waterMapMarkers);
         }
 
         internal YanorraMap.Elevation MapElevation => _elevation;
@@ -324,8 +334,6 @@ namespace KeepDriving
         {
             int resolution = _sourceHeights.GetLength(0);
             var heights = new float[resolution, resolution];
-            Vector2Int offset = key - _spawn.Tile;
-            bool bordersSource = Mathf.Abs(offset.x) <= 1 && Mathf.Abs(offset.y) <= 1;
             for (int z = 0; z < resolution; z++)
             {
                 token.ThrowIfCancellationRequested();
@@ -333,19 +341,24 @@ namespace KeepDriving
                 for (int x = 0; x < resolution; x++)
                 {
                     double u = x / (resolution - 1.0);
-                    float height = _elevation.Sample((key.x + u) * TileSize, (key.y + v) * TileSize) + _datumOffset;
-                    if (bordersSource)
-                    {
-                        float localX = offset.x + (float)u, localZ = offset.y + (float)v;
-                        float edgeX = Mathf.Clamp01(localX), edgeZ = Mathf.Clamp01(localZ);
-                        float distance = Mathf.Max(Mathf.Abs(localX - edgeX), Mathf.Abs(localZ - edgeZ));
-                        float weight = Mathf.SmoothStep(0, 1, distance);
-                        height = Mathf.Lerp(SampleSourceEdge(edgeX, edgeZ), height, weight);
-                    }
+                    float height = SampleGround((key.x + u) * TileSize, (key.y + v) * TileSize);
                     heights[z, x] = Mathf.Clamp01((height - _baseY) / _heightRange);
                 }
             }
             return heights;
+        }
+
+        private float SampleGround(double east, double north)
+        {
+            float localX = (float)(east / TileSize - _spawn.Tile.x);
+            float localZ = (float)(north / TileSize - _spawn.Tile.y);
+            float edgeX = Mathf.Clamp01(localX), edgeZ = Mathf.Clamp01(localZ);
+            float distance = Mathf.Max(Mathf.Abs(localX - edgeX), Mathf.Abs(localZ - edgeZ));
+            if (distance == 0f) return SampleSourceEdge(edgeX, edgeZ);
+
+            float height = _elevation.Sample(east, north) + _datumOffset;
+            if (distance >= 1f) return height;
+            return Mathf.Lerp(SampleSourceEdge(edgeX, edgeZ), height, Mathf.SmoothStep(0, 1, distance));
         }
 
         private float SampleSourceEdge(float u, float v)
@@ -391,26 +404,31 @@ namespace KeepDriving
             return terrain;
         }
 
-        private bool HasChannels(Vector2Int key)
+        private bool HasWater(Vector2Int key)
         {
+            foreach (var body in _waterBodies)
+                if (body.OverlapsTile(key)) return true;
             foreach (var water in _waterways)
                 if (water.Surface.HasChannel(key)) return true;
             return false;
         }
 
-        private void CarveChannels(Vector2Int key, TerrainData data)
+        private void CarveWater(Vector2Int key, Terrain terrain)
         {
-            if (!HasChannels(key)) return;
+            if (!HasWater(key)) return;
+            TerrainData data = terrain.terrainData;
             int resolution = data.heightmapResolution;
             var cuts = new float[resolution, resolution];
             foreach (var water in _waterways)
                 water.Surface.AccumulateDepth(key, cuts);
 
             var heights = data.GetHeights(0, 0, resolution, resolution);
+            foreach (var body in _waterBodies)
+                body.AccumulateCut(key, data, terrain.GetPosition().y, heights, cuts);
             float range = data.size.y;
             for (int z = 0; z < resolution; z++)
             for (int x = 0; x < resolution; x++)
-                heights[z, x] = Mathf.Max(0, heights[z, x] - cuts[z, x] / range);
+                heights[z, x] = Mathf.Clamp01(heights[z, x] - cuts[z, x] / range);
             data.SetHeights(0, 0, heights);
         }
 
@@ -418,7 +436,7 @@ namespace KeepDriving
         {
             // A child terrain reserves space beneath zero while the scene's authored objects stay in place.
             var data = Instantiate(_sourceData);
-            data.name = _sourceData.name + " (Runtime channels)";
+            data.name = _sourceData.name + " (Runtime water)";
             data.size = new Vector3(TileSize, _sourceHeightSize + RiverDepth, TileSize);
             int resolution = _sourceData.heightmapResolution;
             var heights = new float[resolution, resolution];
@@ -429,7 +447,7 @@ namespace KeepDriving
 
             GameObject tile = Terrain.CreateTerrainGameObject(data);
             SceneManager.MoveGameObjectToScene(tile, gameObject.scene);
-            tile.name = "Starting terrain (Runtime channels)";
+            tile.name = "Starting terrain (Runtime water)";
             tile.layer = _source.gameObject.layer;
             tile.transform.SetParent(_source.transform, false);
             tile.transform.localPosition = Vector3.down * RiverDepth;
@@ -486,6 +504,20 @@ namespace KeepDriving
             }
         }
 
+        private void LoadWaterBodies(Shader shader)
+        {
+            if (!waterBodiesGeoJson) return;
+            try
+            {
+                foreach (var body in WaterBody.Read(waterBodiesGeoJson, shader, point => SampleGround(point.x, point.y)))
+                    _waterBodies.Add(body);
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Could not load water bodies: {error.Message}", this);
+            }
+        }
+
         private void AddWaterway(Shader shader, string type, float width, float depth, Color tint, float ripples, float speed, Color mapColor, float mapWidth)
         {
             try
@@ -505,20 +537,20 @@ namespace KeepDriving
 
         private void AttachRoutes(Vector2Int key, Terrain terrain)
         {
-
+            foreach (var body in _waterBodies)
+                AttachSurface(body.BuildTile(key, terrain.GetPosition().y), body.Material, body.Name, terrain);
             foreach (var water in _waterways)
-                AttachRoute(water.Surface, water.Material, water.Name, key, terrain);
+                AttachSurface(water.Surface.BuildTile(key, terrain.terrainData), water.Material, water.Name, terrain);
             // Sample the water surface on the original ground, then lower the bed beneath it.
-            CarveChannels(key, terrain.terrainData);
+            CarveWater(key, terrain);
             if (terrain == _startingTerrain && terrain != _source && terrain.terrainData.treeInstanceCount > 0)
                 terrain.terrainData.SetTreeInstances(terrain.terrainData.treeInstances, true);
             foreach (var route in _landRoutes)
-                AttachRoute(route.Surface, route.Material, route.Name, key, terrain);
+                AttachSurface(route.Surface.BuildTile(key, terrain.terrainData), route.Material, route.Name, terrain);
         }
 
-        private void AttachRoute(RouteSurface route, Material material, string name, Vector2Int key, Terrain terrain)
+        private void AttachSurface(Mesh mesh, Material material, string name, Terrain terrain)
         {
-            Mesh mesh = route?.BuildTile(key, terrain.terrainData);
             if (!mesh) return;
             var surface = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
             surface.transform.SetParent(terrain.transform, false);
@@ -569,6 +601,7 @@ namespace KeepDriving
             }
             foreach (var route in _landRoutes) Destroy(route.Material);
             foreach (var water in _waterways) Destroy(water.Material);
+            foreach (var body in _waterBodies) body.Dispose();
             if (_sitesRoot) Destroy(_sitesRoot);
         }
     }

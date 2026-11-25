@@ -283,7 +283,7 @@ namespace KeepDriving
             return mesh;
         }
 
-        private static void Clip(List<Vector2> input, List<Vector2> output, int axis, float edge, bool keepAbove)
+        internal static void Clip(List<Vector2> input, List<Vector2> output, int axis, float edge, bool keepAbove)
         {
             output.Clear();
             if (input.Count == 0) return;

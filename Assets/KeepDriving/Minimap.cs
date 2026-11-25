@@ -7,7 +7,8 @@ namespace KeepDriving
     internal sealed class Minimap
     {
         const int Resolution = 128;
-        const float Range = 300f;
+        const float MinRange = 10f;
+        const float MaxRange = 1000f;
         const float PanStep = 16f;
         static readonly Color Frame = new(.05f, .09f, .085f, .96f);
         static readonly Color Rule = new(.32f, .43f, .38f);
@@ -24,7 +25,16 @@ namespace KeepDriving
         readonly List<Vector3> mapSites = new();
         Node[] nodes = System.Array.Empty<Node>();
         Vector2 center;
+        float range = 300f;
         float nextNodeScan, nextReliefRefresh;
+
+        public void Zoom(int direction)
+        {
+            float nextRange = Mathf.Clamp(direction > 0 ? range * .5f : range * 2f, MinRange, MaxRange);
+            if (nextRange == range) return;
+            range = nextRange;
+            nextReliefRefresh = 0f;
+        }
 
         public void Draw(Scene scene, Vector3 position, float heading, TerrainStream terrainStream)
         {
@@ -35,7 +45,8 @@ namespace KeepDriving
                 nextNodeScan = Time.unscaledTime + 1f;
             }
 
-            var newCenter = new Vector2(Mathf.Round(position.x / PanStep), Mathf.Round(position.z / PanStep)) * PanStep;
+            float panStep = Mathf.Min(PanStep, range / 20f);
+            var newCenter = new Vector2(Mathf.Round(position.x / panStep), Mathf.Round(position.z / panStep)) * panStep;
             if (newCenter != center || Time.unscaledTime >= nextReliefRefresh)
             {
                 center = newCenter;
@@ -55,14 +66,16 @@ namespace KeepDriving
             if (terrainStream && terrainStream.HasSource)
             {
                 Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
-                terrainStream.DrawMapRoutes(map, new Rect(mapCenter.x - Range * .5f, mapCenter.y - Range * .5f, Range, Range));
+                var world = new Rect(mapCenter.x - range * .5f, mapCenter.y - range * .5f, range, range);
+                terrainStream.DrawMapWaterBodies(map, world);
+                terrainStream.DrawMapRoutes(map, world);
             }
             DrawNodes(scene, map, terrainStream);
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
 
             DrawIcon(diamond, new Vector2(map.x + 5, map.yMax + 13), 9, 0, Amber);
             GUI.Label(new Rect(map.x + 14, map.yMax + 4, size - 14, 18), "SATELLITE NODE", left);
-            GUI.Label(new Rect(map.x, map.yMax + 4, size, 18), "300 m", right);
+            GUI.Label(new Rect(map.x, map.yMax + 4, size, 18), (range >= 1000f ? $"{range / 1000f:0.#} km" : $"{range:0.#} m"), right);
         }
 
         void DrawGrid(Rect map)
@@ -111,7 +124,7 @@ namespace KeepDriving
 
         Vector2 Project(Vector3 point, Rect map)
         {
-            float scale = map.width / Range;
+            float scale = map.width / range;
             return map.center + new Vector2(point.x - center.x, center.y - point.z) * scale;
         }
 
@@ -131,9 +144,9 @@ namespace KeepDriving
         void UpdateRelief(Scene scene)
         {
             System.Array.Fill(pixels, (Color32)Unmapped);
-            float west = center.x - Range * .5f;
-            float south = center.y - Range * .5f;
-            float step = Range / Resolution;
+            float west = center.x - range * .5f;
+            float south = center.y - range * .5f;
+            float step = range / Resolution;
             foreach (Terrain terrain in Terrain.activeTerrains)
             {
                 if (terrain.gameObject.scene != scene || !terrain.terrainData) continue;
