@@ -21,7 +21,10 @@ namespace KeepDriving
         [SerializeField] private TextAsset waterwaysGeoJson;
         [SerializeField] private TextAsset waterBodiesGeoJson;
 
-        private const int WindowRadius = 1;
+        [SerializeField, Min(1), Tooltip("Tiles per side, including the player's tile. Even values round up so the grid stays centered.")]
+        private int streamingGridSize = 3;
+
+        private int WindowRadius => Mathf.Max(1, streamingGridSize) / 2;
         private const float OriginShiftDistance = 1600f;
         private const float RiverDepth = 10f, StreamDepth = 5f, SeasonalStreamDepth = 1f;
         private const int TileSize = YanorraMap.TileSize;
@@ -162,6 +165,12 @@ namespace KeepDriving
 
         internal YanorraMap.Elevation MapElevation => _elevation;
 
+        internal void CollectLoadedTiles(HashSet<Vector2Int> tiles)
+        {
+            tiles.Clear();
+            tiles.UnionWith(_tiles.Keys);
+        }
+
         internal Vector2 ToMapPosition(Vector3 position) => new Vector2(
             _originTile.x * TileSize + (position.x - _origin.x),
             _originTile.y * TileSize + (position.z - _origin.z));
@@ -218,8 +227,9 @@ namespace KeepDriving
         {
             if (!HasSource) return;
             Vector2Int center = WorldTile(focus);
-            var min = Vector2Int.Max(Vector2Int.zero, center - Vector2Int.one * WindowRadius);
-            var max = Vector2Int.Min(Vector2Int.one * (YanorraMap.TileCount - 1), center + Vector2Int.one * WindowRadius);
+            Vector2Int buffer = Vector2Int.one * WindowRadius;
+            var min = Vector2Int.Max(Vector2Int.zero, center - buffer);
+            var max = Vector2Int.Min(Vector2Int.one * (YanorraMap.TileCount - 1), center + buffer);
 
             _expired.Clear();
             foreach (var entry in _tiles)

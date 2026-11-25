@@ -27,6 +27,12 @@ namespace KeepDriving
         TerminalScreen terminalScreen;
         Terminal activeTerminal;
         readonly Minimap minimap = new Minimap();
+        [SerializeField] private bool showSpawnedTileOutline = true;
+        [SerializeField, Min(0f), Tooltip("Show the yellow outline at this map width in kilometers or closer.")]
+        private float spawnedTileOutlineMaxWidthKm = 100f;
+        [SerializeField] private bool showSpawnedTileGrid = true;
+        [SerializeField, Min(0f), Tooltip("Show the individual tile lines at this map width in kilometers or closer.")]
+        private float spawnedTileGridMaxWidthKm = 12.5f;
         readonly WorldMap worldMap = new WorldMap();
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
@@ -418,8 +424,18 @@ namespace KeepDriving
             if (worldMap.IsOpen)
             {
                 if (Event.current.type == EventType.Repaint)
-                    worldMap.Draw(terrainStream, driving ? car.position : player.transform.position,
+                {
+                    bool showTileOutline = worldMap.WidthKm <= spawnedTileOutlineMaxWidthKm;
+                    bool showTileGrid = worldMap.WidthKm <= spawnedTileGridMaxWidthKm;
+
+                    // Draw(TerrainStream stream, Vector3 player, bool showSpawnedTileOutline, bool showSpawnedTileGrid, float heading)
+                    worldMap.Draw(terrainStream, 
+                        driving ? car.position : player.transform.position,
+                        showTileOutline,
+                        showTileGrid,
                         driving ? car.rotation.eulerAngles.y : yaw);
+                }
+
                 return;
             }
 

@@ -11,6 +11,9 @@ namespace KeepDriving
         private static readonly Color Border = new(.35f, .46f, .43f);
         private static readonly Color NodeColor = new(1f, .72f, .29f);
         private static readonly Color PlayerColor = new(.42f, 1f, .92f);
+        private static readonly Color TileOutline = new(1f, .91f, .2f);
+        private static readonly Color TileGrid = new(.15f, .17f, .18f, .55f);
+        private readonly HashSet<Vector2Int> _loadedTiles = new();
         private readonly List<Vector2> _mapSites = new();
         private Node[] _sceneNodes;
         private static readonly Rect FullWorld = new(0, 0, YanorraMap.WorldSize, YanorraMap.WorldSize);
@@ -20,6 +23,7 @@ namespace KeepDriving
         private GUIStyle _label, _title, _centered;
 
         public bool IsOpen { get; private set; }
+        public float WidthKm => _span / 1000f;
 
         public void Open(TerrainStream stream)
         {
@@ -58,7 +62,7 @@ namespace KeepDriving
             return _zoomTerrain;
         }
 
-        public void Draw(TerrainStream stream, Vector3 player, float heading)
+        public void Draw(TerrainStream stream, Vector3 player, bool showSpawnedTileOutline, bool showSpawnedTileGrid, float heading)
         {
             if (_label == null)
             {
@@ -93,7 +97,15 @@ namespace KeepDriving
             }
 
             stream.DrawMapWaterBodies(map, world);
-            if (!_playerArrow) _playerArrow = Minimap.CreateIcon("World map player arrow", true);
+            if (showSpawnedTileOutline || showSpawnedTileGrid)
+            {
+                HighlightSpawnedTiles(stream, map, world, showSpawnedTileOutline, showSpawnedTileGrid);
+            }
+
+            if (!_playerArrow)
+            {
+                _playerArrow = Minimap.CreateIcon("World map player arrow", true);
+            }
             Minimap.DrawIcon(_playerArrow, Project(playerPosition, map, world), 18f, heading, PlayerColor);
 
             DrawNode(new Vector2(map.x + 6, map.yMax + 23));
@@ -106,6 +118,52 @@ namespace KeepDriving
             if (size >= 420)
                 GUI.Label(new Rect(map.xMax - 175, map.yMax + 10, 95, 26), "= / - zoom", _label);
             GUI.Label(new Rect(map.xMax - 78, map.yMax + 10, 78, 26), "M / Esc close", _label);
+        }
+
+        private void HighlightSpawnedTiles(TerrainStream stream, Rect map, Rect world, bool showOutline, bool showGrid)
+        {
+            stream.CollectLoadedTiles(_loadedTiles);
+            const int size = YanorraMap.TileSize;
+            foreach (var tile in _loadedTiles)
+            {
+                var sw = new Vector2(tile.x * size, tile.y * size);
+                var ne = sw + Vector2.one * size;
+                var nw = new Vector2(sw.x, ne.y);
+                var se = new Vector2(ne.x, sw.y);
+                bool eastLoaded = _loadedTiles.Contains(tile + Vector2Int.right);
+                bool northLoaded = _loadedTiles.Contains(tile + Vector2Int.up);
+                if (showGrid)
+                {
+                    if (eastLoaded) DrawTileEdge(se, ne, map, world, TileGrid, 1f);
+                    if (northLoaded) DrawTileEdge(nw, ne, map, world, TileGrid, 1f);
+                }
+                if (showOutline)
+                {
+                    if (!_loadedTiles.Contains(tile + Vector2Int.left)) DrawTileEdge(sw, nw, map, world, TileOutline, 2f);
+                    if (!eastLoaded) DrawTileEdge(se, ne, map, world, TileOutline, 2f);
+                    if (!_loadedTiles.Contains(tile + Vector2Int.down)) DrawTileEdge(sw, se, map, world, TileOutline, 2f);
+                    if (!northLoaded) DrawTileEdge(nw, ne, map, world, TileOutline, 2f);
+                }
+            }
+        }
+
+        private static void DrawTileEdge(Vector2 start, Vector2 end, Rect map, Rect world, Color color, float width)
+        {
+            if (end.x < world.xMin || start.x > world.xMax ||
+                end.y < world.yMin || start.y > world.yMax) return;
+
+            Vector2 a = Project(start, map, world);
+            Vector2 b = Project(end, map, world);
+            if (start.x == end.x && a.y > b.y)
+            {
+                float x = Mathf.Clamp(a.x - width * .5f, map.xMin, map.xMax - width);
+                Fill(new Rect(x, b.y, width, a.y - b.y), color);
+            }
+            else if (start.y == end.y && b.x > a.x)
+            {
+                float y = Mathf.Clamp(a.y - width * .5f, map.yMin, map.yMax - width);
+                Fill(new Rect(a.x, y, b.x - a.x, width), color);
+            }
         }
 
         private static bool Contains(Rect world, Vector2 point) =>

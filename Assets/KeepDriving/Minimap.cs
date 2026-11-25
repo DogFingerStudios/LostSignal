@@ -8,7 +8,7 @@ namespace KeepDriving
     {
         const int Resolution = 128;
         const float MinRange = 10f;
-        const float MaxRange = 1000f;
+        const float MaxRange = 500 * 100; // 100 tiles by 100 tiles
         const float PanStep = 16f;
         static readonly Color Frame = new(.05f, .09f, .085f, .96f);
         static readonly Color Rule = new(.32f, .43f, .38f);
