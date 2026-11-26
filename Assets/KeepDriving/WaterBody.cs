@@ -100,7 +100,7 @@ namespace KeepDriving
             var style = type switch
             {
                 "lake" => (new Color(.62f, .94f, 1.45f), 1.15f, .8f, new Color(.28f, .58f, 1f)),
-                "pond" => (new Color(.96f, 1.26f, .56f), .38f, .42f, new Color(.60f, .81f, .34f)),
+                "pond" => (new Color(.55f, 1.05f, 1.35f), .38f, .42f, new Color(.28f, .65f, .92f)),
                 _ => (new Color(.45f, 1.25f, 1.18f), .75f, 1.2f, new Color(.31f, .94f, .88f))
             };
             Material = new Material(shader) { name = name };
