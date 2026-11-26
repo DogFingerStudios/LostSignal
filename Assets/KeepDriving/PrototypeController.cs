@@ -571,7 +571,7 @@ namespace KeepDriving
                     GUI.DrawTexture(dot, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, Color.white, 0f, radius);
                 }
             }
-            
+
             if (terrainStream && terrainStream.GetTile(position) is Vector2Int tile)
             {
                 GUI.Box(new Rect(16, driving ? 142 : 104, 200, 30), $"Tile ({tile.x}, {tile.y})");

@@ -14,6 +14,8 @@ namespace KeepDriving
         [SerializeField, Min(1f), Tooltip("Maximum minimap width in meters.")]
         private float maximumWidth = 50000f;
 
+        [SerializeField] private List<MapMarker> trackedMarkers = new();
+
         private const int Resolution = 128;
         private const float PanStep = 16f;
         private TerrainStream terrainStream;
@@ -98,6 +100,15 @@ namespace KeepDriving
                 terrainStream.DrawMapRoutes(map, world);
             }
             DrawNodes(map);
+            foreach (var marker in trackedMarkers)
+            {
+                if (!marker || !marker.CanDraw) continue;
+                Vector2 delta = Project(marker.Position, map) - map.center;
+                float edge = Mathf.Max(Mathf.Abs(delta.x), Mathf.Abs(delta.y));
+                float limit = Mathf.Max(0, (map.width - marker.Size) * .5f - 2f);
+                if (edge > limit) delta *= limit / edge;
+                marker.Draw(map.center + delta);
+            }
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
 
             DrawIcon(diamond, new Vector2(map.x + 5, map.yMax + 13), 9, 0, Amber);

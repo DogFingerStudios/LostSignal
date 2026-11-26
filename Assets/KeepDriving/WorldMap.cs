@@ -16,6 +16,8 @@ namespace KeepDriving
         [SerializeField, Min(0f), Tooltip("Show the individual tile lines at this map width in kilometers or closer.")]
         private float spawnedTileGridMaxWidthKm = 12.5f;
 
+        [SerializeField] private List<MapMarker> trackedMarkers = new();
+
         private TerrainStream _stream;
         private const int Resolution = 512;
         private const float MinSpan = 10f;
@@ -161,6 +163,12 @@ namespace KeepDriving
                 HighlightSpawnedTiles(_stream, map, world, showOutline, showGrid);
             }
 
+            foreach (var marker in trackedMarkers)
+            {
+                if (!marker || !marker.CanDraw) continue;
+                Vector2 position = _stream.ToMapPosition(marker.Position);
+                if (Contains(world, position)) marker.Draw(Project(position, map, world));
+            }
             if (!_playerArrow)
             {
                 _playerArrow = Minimap.CreateIcon("World map player arrow", true);
