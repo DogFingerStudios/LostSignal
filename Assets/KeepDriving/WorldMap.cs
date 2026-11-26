@@ -314,6 +314,74 @@ namespace KeepDriving
             return pixels;
         }
 
+#if UNITY_EDITOR
+        public static void BakeMinimapArchive(TextAsset controlPoints, TextAsset fallback, TextAsset biomes, string output)
+        {
+            var elevation = controlPoints ? new YanorraMap.Elevation(controlPoints, fallback) : new YanorraMap.Elevation(fallback);
+            var woodland = biomes ? new WoodlandBiomes(biomes, 0) : null;
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(output));
+            string draft = output + ".tmp";
+            var offsets = new long[BakedMinimap.TileCount];
+            try
+            {
+                using (var file = System.IO.File.Create(draft))
+                using (var writer = new System.IO.BinaryWriter(file))
+                {
+                    writer.Write(BakedMinimap.Magic);
+                    writer.Write(BakedMinimap.TileCount);
+                    file.Position += offsets.Length * sizeof(long);
+                    for (int level = 0; level < BakedMinimap.Sides.Length; level++)
+                    {
+                        int side = BakedMinimap.Sides[level], resolution = BakedMinimap.Resolutions[level];
+                        for (int z = 0; z < side; z++)
+                        {
+                            int row = z, currentLevel = level;
+                            var data = new byte[side][];
+                            Parallel.For(0, side, x =>
+                            {
+                                Rect tile = BakedMinimap.TileBounds(currentLevel, x, row);
+                                float gutter = tile.width / resolution;
+                                Rect padded = Rect.MinMaxRect(tile.xMin - gutter, tile.yMin - gutter,
+                                    tile.xMax + gutter, tile.yMax + gutter);
+                                var colors = BuildTerrainPixels(elevation, padded, resolution + 2, woodland, CancellationToken.None);
+                                using var buffer = new System.IO.MemoryStream();
+                                using (var zip = new System.IO.Compression.DeflateStream(buffer,
+                                    System.IO.Compression.CompressionLevel.Fastest, true))
+                                {
+                                    var rgb = new byte[colors.Length * 3];
+                                    for (int i = 0; i < colors.Length; i++)
+                                    {
+                                        rgb[3 * i] = colors[i].r;
+                                        rgb[3 * i + 1] = colors[i].g;
+                                        rgb[3 * i + 2] = colors[i].b;
+                                    }
+                                    zip.Write(rgb, 0, rgb.Length);
+                                }
+                                data[x] = buffer.ToArray();
+                            });
+                            for (int x = 0; x < side; x++)
+                            {
+                                offsets[BakedMinimap.TileId(level, x, z)] = file.Position;
+                                writer.Write(data[x].Length);
+                                writer.Write(data[x]);
+                            }
+                        }
+                    }
+                    file.Position = 8;
+                    foreach (long offset in offsets) writer.Write(offset);
+                }
+                BakedMinimap.ReadTile(draft, 0, BakedMinimap.Resolutions[0] + 2);
+                BakedMinimap.ReadTile(draft, BakedMinimap.TileCount - 1, BakedMinimap.Resolutions[2] + 2);
+                if (System.IO.File.Exists(output)) System.IO.File.Replace(draft, output, null);
+                else System.IO.File.Move(draft, output);
+            }
+            finally
+            {
+                if (System.IO.File.Exists(draft)) System.IO.File.Delete(draft);
+            }
+        }
+#endif
+
         private void OnDestroy()
         {
             _shutdown.Cancel();

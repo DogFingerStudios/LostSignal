@@ -16,7 +16,6 @@ namespace KeepDriving
 
         [SerializeField] private List<MapMarker> trackedMarkers = new();
 
-        private const int Resolution = 128;
         private const float PanStep = 16f;
         private TerrainStream terrainStream;
 
@@ -27,20 +26,28 @@ namespace KeepDriving
         static readonly Color Mint = new(.64f, 1f, .8f);
         static readonly Color Unmapped = new(.08f, .13f, .12f);
 
-        Texture2D relief, arrow, diamond;
+        Texture2D arrow, diamond;
+        BakedMinimap relief;
+        bool spawnPrefetched;
         GUIStyle left, right;
         readonly List<Vector3> mapSites = new();
         Node[] nodes = System.Array.Empty<Node>();
         Vector2 center;
         float range;
         float nextNodeScan;
-        Rect reliefBounds;
-        YanorraMap.Elevation reliefElevation;
 
         private void Awake()
         {
             terrainStream = GetComponent<TerrainStream>();
             range = ClampWidth(startingWidth);
+            relief = new BakedMinimap();
+        }
+
+        private void Update()
+        {
+            relief.Pump();
+            if (!spawnPrefetched && terrainStream.HasSource)
+                spawnPrefetched = relief.Prefetch(terrainStream.ToMapPosition(terrainStream.SpawnPosition), range);
         }
 
         private float ClampWidth(float width)
@@ -60,7 +67,7 @@ namespace KeepDriving
         public void Draw(Vector3 position, float heading)
         {
             if (!isActiveAndEnabled) return;
-            if (!relief) Initialize();
+            if (!arrow) Initialize();
             if (Time.unscaledTime >= nextNodeScan)
             {
                 nodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
@@ -75,13 +82,6 @@ namespace KeepDriving
             {
                 Vector2 mapCenter = terrainStream.ToMapPosition(new Vector3(center.x, 0, center.y));
                 world = new Rect(mapCenter.x - range * .5f, mapCenter.y - range * .5f, range, range);
-                var elevation = terrainStream.MapElevation;
-                if (world != reliefBounds || elevation != reliefElevation)
-                {
-                    WorldMap.UpdateTerrain(relief, elevation, world, terrainStream.MapWoodland);
-                    reliefBounds = world;
-                    reliefElevation = elevation;
-                }
             }
 
             float size = Mathf.Clamp(Screen.height * .29f, 120, 220);
@@ -91,8 +91,9 @@ namespace KeepDriving
             Fill(new Rect(frame.x + 1, frame.y + 1, frame.width - 2, frame.height - 2), Frame);
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "LOCAL TERRAIN", left);
             GUI.Label(new Rect(map.x, map.y - 23, size, 19), "N ↑", right);
-            if (hasMap) GUI.DrawTexture(map, relief);
-            else Fill(map, Unmapped);
+            Fill(map, Unmapped);
+            if (hasMap) relief.Draw(map, world);
+
             DrawGrid(map);
             if (hasMap)
             {
@@ -168,7 +169,6 @@ namespace KeepDriving
 
         void Initialize()
         {
-            relief = WorldMap.CreateTerrainTexture("Minimap relief", Resolution);
             arrow = CreateIcon("Minimap arrow", true);
             diamond = CreateIcon("Minimap node", false);
             left = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold };
@@ -218,7 +218,7 @@ namespace KeepDriving
 
         private void OnDestroy()
         {
-            if (relief) Object.Destroy(relief);
+            relief?.Dispose();
             if (arrow) Object.Destroy(arrow);
             if (diamond) Object.Destroy(diamond);
         }
