@@ -1,0 +1,22 @@
+Car audio credits
+
+Car idle by seth-m (CC0)
+https://freesound.org/people/seth-m/sounds/269771/
+
+Car Engine Loop by qubodup (CC BY 4.0)
+https://freesound.org/people/qubodup/sounds/147242/
+Used as a loop with playback pitch and volume adjusted in-game.
+
+Rev.ogg by egomassive (CC0), derived from Auto Interior Start Shift Accelerate by Producer Dan (CC0)
+https://freesound.org/people/egomassive/sounds/536755/
+
+Inside car 90 km asphalt 190710_0056.wav by klankbeeld (Freesound.org, CC BY 4.0)
+https://freesound.org/people/klankbeeld/sounds/612011/
+Excerpted and crossfaded into a loop with playback pitch and volume adjusted in-game.
+
+Tires on Gravel Road 2 by OBXJohn (CC0)
+https://freesound.org/people/OBXJohn/sounds/251662/
+Excerpted and crossfaded into a loop.
+
+CC BY 4.0 license
+https://creativecommons.org/licenses/by/4.0/

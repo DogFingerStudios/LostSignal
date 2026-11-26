@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Audio;
 using UnityEngine.SceneManagement;
 
 namespace KeepDriving.Editor
@@ -47,10 +48,12 @@ namespace KeepDriving.Editor
             Object.DestroyImmediate(body.GetComponent<BoxCollider>());
             body.GetComponent<Renderer>().sharedMaterial = Material("Car", new Color(.12f, .35f, .65f));
             var rb = car.AddComponent<Rigidbody>();
+            car.AddComponent<CarMotion>();
             rb.mass = 1200; rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.isKinematic = true;
             rb.constraints = RigidbodyConstraints.None;
             var audio = car.AddComponent<AudioSource>();
+            ConfigureCarAudio(car.AddComponent<CarAudio>(), audio);
             audio.playOnAwake = false; audio.loop = true; audio.volume = .35f; audio.spatialBlend = 0;
             const int rate = 44100;
             var clip = AudioClip.Create("Horn", rate, 1, rate, false);
@@ -74,6 +77,29 @@ namespace KeepDriving.Editor
             AssetDatabase.SaveAssets();
             Debug.Log("KEEP_DRIVING_SCENE_READY");
         }
+        static void ConfigureCarAudio(CarAudio carAudio, AudioSource horn)
+        {
+            const string audioPath = "Assets/_Game/Audio/";
+            const string clipPath = audioPath + "SFX/Car/";
+            var mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(audioPath + "AudioMaster.mixer");
+            var groups = mixer ? mixer.FindMatchingGroups("Master/SFX") : System.Array.Empty<AudioMixerGroup>();
+            if (groups.Length == 0)
+            {
+                Debug.LogWarning("Car audio requires the SFX group in AudioMaster.");
+                return;
+            }
+
+            horn.outputAudioMixerGroup = groups[0];
+            var settings = new SerializedObject(carAudio);
+            settings.FindProperty("sfxGroup").objectReferenceValue = groups[0];
+            settings.FindProperty("idleClip").objectReferenceValue = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath + "Car_Idle.wav");
+            settings.FindProperty("engineClip").objectReferenceValue = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath + "Car_CruiseAndSustainedAcceleration.wav");
+            settings.FindProperty("boostClip").objectReferenceValue = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath + "Car_HardAccelerationAccent.wav");
+            settings.FindProperty("pavementClip").objectReferenceValue = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath + "Car_PavementAndCabinNoise_Loop.wav");
+            settings.FindProperty("gravelClip").objectReferenceValue = AssetDatabase.LoadAssetAtPath<AudioClip>(clipPath + "Car_GravelTireRoll_Loop.wav");
+            settings.ApplyModifiedPropertiesWithoutUndo();
+        }
+
         static Material Material(string name, Color color)
         {
             string path = "Assets/KeepDriving/" + name + ".mat";

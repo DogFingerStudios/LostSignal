@@ -22,6 +22,10 @@ namespace KeepDriving
         float lastDrivingLook;
         bool carGrounded = true;
         Transform carBody;
+        CarMotion carMotion;
+        CarAudio carAudio;
+        float engineLoad;
+        bool boosting, onPavement;
         float lastEscape = -10f, quitHintUntil;
         const float WalkSpeed = 5f;
         readonly Collider[] exitHits = new Collider[16];
@@ -46,9 +50,16 @@ namespace KeepDriving
                 worldMap = terrainStream.GetComponent<WorldMap>();
                 minimap = terrainStream.GetComponent<Minimap>();
             }
+            InitializeCarMotion();
             car.isKinematic = true;
             carBody = car.transform.Find("Rectangle Body");
+            carAudio = car.GetComponent<CarAudio>();
             tyreSkid = car.gameObject.AddComponent<AudioSource>();
+            if (carAudio && carAudio.SfxGroup)
+            {
+                horn.outputAudioMixerGroup = carAudio.SfxGroup;
+                tyreSkid.outputAudioMixerGroup = carAudio.SfxGroup;
+            }
             tyreSkid.playOnAwake = false;
             tyreSkid.loop = true;
             if (!tyreSkidClip) generatedTyreSkid = CreateTyreSkidClip();
@@ -220,6 +231,12 @@ namespace KeepDriving
             return Vector2.ClampMagnitude(new Vector2((k.dKey.isPressed ? 1 : 0) - (k.aKey.isPressed ? 1 : 0), (k.wKey.isPressed ? 1 : 0) - (k.sKey.isPressed ? 1 : 0)), 1);
         }
 
+        void InitializeCarMotion()
+        {
+            if (!car.TryGetComponent(out carMotion))
+                carMotion = car.gameObject.AddComponent<CarMotion>();
+        }
+
         void FixedUpdate()
         {
             if (WaitingForTerrain) return;
@@ -233,16 +250,24 @@ namespace KeepDriving
             float throttle = driving && keys != null ? Axis(keys.wKey.isPressed, keys.sKey.isPressed) : 0f;
             float steer = driving && keys != null ? Axis(keys.dKey.isPressed, keys.aKey.isPressed) : 0f;
             bool handbrake = !driving || keys?.spaceKey.isPressed == true;
-            steering = Mathf.MoveTowards(steering, steer, 5f * dt);
+            if (!carMotion) InitializeCarMotion();
+            steering = carMotion.StepSteering(steering, steer, dt);
 
             Vector3 forward = Vector3.ProjectOnPlane(car.rotation * Vector3.forward, Vector3.up).normalized;
             float oldSpeed = Vector3.Dot(carVelocity, forward);
-            float traction = carGrounded && terrainStream && terrainStream.IsOnLandRoute(car.position) ? 1f : .76f;
+            bool onRoute = carGrounded && terrainStream && terrainStream.IsOnLandRoute(car.position);
+            float traction = onRoute ? 1f : carMotion.OffRouteTraction;
+            bool boostHeld = driving && ShiftHeld;
             if (carGrounded)
-                carVelocity = CarMotion.Step(carVelocity, forward, throttle, driving && ShiftHeld, handbrake, dt, traction);
+                carVelocity = carMotion.Step(carVelocity, forward, throttle, boostHeld, handbrake, dt, traction);
 
             float longitudinalSpeed = Vector3.Dot(carVelocity, forward);
-            float yawRate = carGrounded ? CarMotion.YawRate(steering, longitudinalSpeed, traction, handbrake) : 0f;
+            bool underThrottle = driving && !handbrake && throttle != 0f;
+            float acceleration = (longitudinalSpeed - oldSpeed) * Mathf.Sign(throttle) / dt;
+            engineLoad = underThrottle ? Mathf.Lerp(.2f, 1f, Mathf.InverseLerp(0f, 8f, acceleration)) : 0f;
+            boosting = underThrottle && boostHeld;
+            onPavement = !terrainStream || !terrainStream.HasSource || onRoute;
+            float yawRate = carGrounded ? carMotion.YawRate(steering, longitudinalSpeed, traction, handbrake) : 0f;
             float heading = car.rotation.eulerAngles.y + yawRate * dt;
             Quaternion flat = Quaternion.Euler(0f, heading, 0f);
             Vector3 position = car.position;
@@ -254,7 +279,7 @@ namespace KeepDriving
             float predictedHeight = position.y + (carVerticalSpeed + .5f * gravity * dt) * dt;
             Quaternion rotation = car.rotation;
             if (GroundPose(next, flat, dt, out float supportHeight, out Quaternion supportRotation)
-                && CarMotion.HasGroundContact(supportHeight, predictedHeight, carGrounded, carVelocity.magnitude))
+                && carMotion.HasGroundContact(supportHeight, predictedHeight, carGrounded, carVelocity.magnitude))
             {
                 next.y = supportHeight;
                 rotation = supportRotation;
@@ -340,6 +365,14 @@ namespace KeepDriving
         void LateUpdate()
         {
             UpdateTyreAudio();
+            if (carAudio)
+            {
+                bool active = driving && !ModalOpen && !WaitingForTerrain;
+                float speed = carVelocity.magnitude;
+                float speedRatio = Mathf.InverseLerp(0f, carMotion.MaxForwardKmh / 3.6f, speed);
+                carAudio.UpdateMix(active, !thirdPerson, speed, speedRatio, active ? engineLoad : 0f,
+                    boosting, carGrounded, onPavement);
+            }
             if (ModalOpen) return;
 
             if (driving && thirdPerson && Time.unscaledTime - lastDrivingLook > 1.25f)
@@ -380,6 +413,8 @@ namespace KeepDriving
         void Enter()
         {
             driving = true;
+            engineLoad = 0f;
+            boosting = false;
             player.enabled = false;
             EnsureDriver();
             yaw = car.rotation.eulerAngles.y;

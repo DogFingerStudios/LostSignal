@@ -269,6 +269,8 @@ GameObject:
   - component: {fileID: 245214888}
   - component: {fileID: 245214887}
   - component: {fileID: 245214891}
+  - component: {fileID: 245214892}
+  - component: {fileID: 245214893}
   m_Layer: 0
   m_Name: Car (1.8m wide x 4.4m long)
   m_TagString: Untagged
@@ -276,6 +278,62 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &245214893
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 245214886}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ac30e4ab5eb4d08ac2bf7493a12eaf6, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.CarAudio
+  sfxGroup: {fileID: -1283452920924675401, guid: 0acfd3505c6483340bdc2dd19bfdfa38, type: 2}
+  idleClip: {fileID: 8300000, guid: 97d8b3d731d5dd14fa5949eb325c21bd, type: 3}
+  engineClip: {fileID: 8300000, guid: 77fc82ebca41ab14e824e495d1123433, type: 3}
+  boostClip: {fileID: 8300000, guid: d73640cdb0e9a5d4e84ef77b1633a231, type: 3}
+  pavementClip: {fileID: 8300000, guid: 310772f48e654789b681298bd9cc412c, type: 3}
+  gravelClip: {fileID: 8300000, guid: cc469422f16c4f5a98441cccf0486a55, type: 3}
+--- !u!114 &245214892
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 245214886}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4e8d2aafb7f0ab48b1e96cb2d036874, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.CarMotion
+  maxForwardKmh: 140
+  maxBoostedForwardKmh: 165
+  maxReverseKmh: 25.2
+  maxBoostedReverseKmh: 30
+  acceleration: 8
+  boostedAcceleration: 10.5
+  topSpeedAcceleration: 2
+  handbrakeDeceleration: 6
+  directionChangeDeceleration: 11
+  directionChangeSpeed: 0.5
+  rollingDrag: 0.55
+  speedSquaredDrag: 0.0018
+  lateralGrip: 7
+  handbrakeLateralGrip: 1.3
+  handbrakeSlideSpeed: 5
+  offRouteTraction: 0.76
+  steeringResponse: 5
+  lowSpeedYawRate: 82
+  highSpeedYawRate: 24
+  yawFadeStartSpeed: 6
+  yawFadeEndSpeed: 36
+  fullSteeringSpeed: 4
+  handbrakeYawMultiplier: 1.25
+  lowSpeedContactLimit: 7
+  lowSpeedContactTolerance: 0.12
+  contactTolerance: 0.003
 --- !u!114 &245214891
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -300,7 +358,7 @@ AudioSource:
   m_GameObject: {fileID: 245214886}
   m_Enabled: 1
   serializedVersion: 4
-  OutputAudioMixerGroup: {fileID: 0}
+  OutputAudioMixerGroup: {fileID: -1283452920924675401, guid: 0acfd3505c6483340bdc2dd19bfdfa38, type: 2}
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 8300000, guid: 27be1042e3cb6f246839a31d82869e29, type: 3}
   m_PlayOnAwake: 0
