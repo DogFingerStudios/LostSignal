@@ -33,6 +33,7 @@ namespace KeepDriving
         private int WindowRadius => Mathf.Max(1, streamingGridSize) / 2;
         private const float OriginShiftDistance = 1600f;
         private const float RiverDepth = 10f, StreamDepth = 5f, SeasonalStreamDepth = 1f;
+        private const float RoadsideTreeBuffer = .5f;
         private const int TileSize = YanorraMap.TileSize;
 
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
@@ -114,9 +115,9 @@ namespace KeepDriving
             _source.allowAutoConnect = false;
             if (roadsGeoJson && dirtRoadShader)
             {
-                AddLandRoute("dirt road", 5f, new Color(.42f, .26f, .15f), new Color(.91f, .72f, .48f), 2f);
-                AddLandRoute("service track", 3f, new Color(.43f, .42f, .36f), new Color(.82f, .78f, .65f), 1.7f);
-                AddLandRoute("footpath", 1.2f, new Color(.56f, .39f, .24f), new Color(.94f, .66f, .40f), 1.3f);
+                AddLandRoute("dirt road", 5f, .15f, new Color(.42f, .26f, .15f), new Color(.91f, .72f, .48f), 2f);
+                AddLandRoute("service track", 3f, .10f, new Color(.43f, .42f, .36f), new Color(.82f, .78f, .65f), 1.7f);
+                AddLandRoute("footpath", 1.2f, .05f, new Color(.56f, .39f, .24f), new Color(.94f, .66f, .40f), 1.3f);
             }
 
             if (waterwaysGeoJson || waterBodiesGeoJson)
@@ -186,6 +187,16 @@ namespace KeepDriving
         {
             tiles.Clear();
             tiles.UnionWith(_tiles.Keys);
+        }
+
+        internal bool IsOnLandRoute(Vector3 position)
+        {
+            if (!HasSource) return false;
+            Vector2Int key = WorldTile(position);
+            Vector2 point = ToMapPosition(position);
+            foreach (var route in _landRoutes)
+                if (route.Surface.ContainsRoute(key, point)) return true;
+            return false;
         }
 
         internal Vector2 ToMapPosition(Vector3 position) => new Vector2(
@@ -566,6 +577,8 @@ namespace KeepDriving
             return _woodland.GenerateTile(key, point =>
             {
                 if ((point - spawn).sqrMagnitude < 12f * 12f) return true;
+                foreach (var route in _landRoutes)
+                    if (route.Surface.ContainsRoute(key, point, includeBuffer: true)) return true;
                 foreach (var water in _waterways)
                     if (water.Surface.ContainsChannel(key, point)) return true;
                 foreach (var body in _waterBodies)
@@ -604,11 +617,11 @@ namespace KeepDriving
             data.SetTreeInstances(instances.ToArray(), true);
         }
 
-        private void AddLandRoute(string type, float width, Color color, Color mapColor, float mapWidth)
+        private void AddLandRoute(string type, float width, float heightOffset, Color color, Color mapColor, float mapWidth)
         {
             try
             {
-                var surface = new RouteSurface(roadsGeoJson, "route_type", type, width, 4f, .05f);
+                var surface = new RouteSurface(roadsGeoJson, "route_type", type, width, 4f, heightOffset, treeBuffer: RoadsideTreeBuffer);
                 var material = new Material(dirtRoadShader) { name = type, color = color };
                 _landRoutes.Add((surface, material, type, mapColor, mapWidth));
             }

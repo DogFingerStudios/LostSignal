@@ -12,7 +12,7 @@ namespace KeepDriving
     internal sealed class RouteSurface
     {
         private const int TileSize = YanorraMap.TileSize;
-        private readonly float _spacing, _heightOffset, _channelDepth;
+        private readonly float _spacing, _heightOffset, _channelDepth, _treeBuffer;
         private readonly Dictionary<Vector2Int, List<Channel>> _channels = new();
 
         private readonly struct Channel
@@ -44,11 +44,12 @@ namespace KeepDriving
             }
         }
 
-        public RouteSurface(TextAsset geoJson, string field, string type, float defaultWidth, float spacing, float heightOffset, float channelDepth = 0f)
+        public RouteSurface(TextAsset geoJson, string field, string type, float defaultWidth, float spacing, float heightOffset, float channelDepth = 0f, float treeBuffer = 0f)
         {
             _spacing = spacing;
             _heightOffset = heightOffset;
             _channelDepth = channelDepth;
+            _treeBuffer = treeBuffer;
             using var reader = JsonReaderWriterFactory.CreateJsonReader(geoJson.bytes, XmlDictionaryReaderQuotas.Max);
             var collection = XElement.Load(reader);
             if ((string)collection.Element("type") != "FeatureCollection" || collection.Element("features") == null)
@@ -142,6 +143,8 @@ namespace KeepDriving
         {
             Vector2 min = Vector2.Min(Vector2.Min(ribbon.LeftStart, ribbon.LeftEnd), Vector2.Min(ribbon.RightStart, ribbon.RightEnd));
             Vector2 max = Vector2.Max(Vector2.Max(ribbon.LeftStart, ribbon.LeftEnd), Vector2.Max(ribbon.RightStart, ribbon.RightEnd));
+            min -= Vector2.one * _treeBuffer;
+            max += Vector2.one * _treeBuffer;
             if (max.x <= 0 || max.y <= 0 || min.x >= YanorraMap.WorldSize || min.y >= YanorraMap.WorldSize) return;
             for (int z = TileAt(min.y); z <= TileAt(max.y); z++)
             for (int x = TileAt(min.x); x <= TileAt(max.x); x++)
@@ -151,6 +154,50 @@ namespace KeepDriving
                     _tiles.Add(key, ribbons = new List<Ribbon>());
                 ribbons.Add(ribbon);
             }
+        }
+
+        public bool ContainsRoute(Vector2Int key, Vector2 point, bool includeBuffer = false)
+        {
+            if (!_tiles.TryGetValue(key, out var ribbons)) return false;
+            float bufferSquared = _treeBuffer * _treeBuffer;
+            foreach (var ribbon in ribbons)
+            {
+                var a = ribbon.LeftStart;
+                var b = ribbon.LeftEnd;
+                var c = ribbon.RightEnd;
+                var d = ribbon.RightStart;
+                // Match the mesh footprint, including its joins, then measure from the actual edges.
+                if (InsideTriangle(point, a, b, c) || InsideTriangle(point, a, c, d) ||
+                    includeBuffer && (SegmentDistanceSquared(point, a, b) <= bufferSquared ||
+                    SegmentDistanceSquared(point, b, c) <= bufferSquared ||
+                    SegmentDistanceSquared(point, c, d) <= bufferSquared ||
+                    SegmentDistanceSquared(point, d, a) <= bufferSquared))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool InsideTriangle(Vector2 point, Vector2 a, Vector2 b, Vector2 c)
+        {
+            float area = Cross(b - a, c - a);
+            if (area == 0f) return false;
+            float ab = Cross(b - a, point - a);
+            float bc = Cross(c - b, point - b);
+            float ca = Cross(a - c, point - c);
+            return area > 0f ? ab >= 0f && bc >= 0f && ca >= 0f : ab <= 0f && bc <= 0f && ca <= 0f;
+        }
+
+        private static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
+
+        private static float SegmentDistanceSquared(Vector2 point, Vector2 a, Vector2 b)
+        {
+            Vector2 edge = b - a;
+            Vector2 offset = point - a;
+            float lengthSquared = edge.sqrMagnitude;
+            if (lengthSquared == 0f) return offset.sqrMagnitude;
+            float along = Mathf.Clamp01(Vector2.Dot(offset, edge) / lengthSquared);
+            return (offset - edge * along).sqrMagnitude;
         }
 
         private void IndexChannel(Channel channel)

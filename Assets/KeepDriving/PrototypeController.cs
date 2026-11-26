@@ -12,8 +12,16 @@ namespace KeepDriving
         public Rigidbody car;
         public Camera view;
         public AudioSource horn;
+        [SerializeField] AudioClip tyreSkidClip;
+        AudioSource tyreSkid;
+        AudioClip generatedTyreSkid;
+        float tyreSlip;
         bool driving, thirdPerson;
-        float yaw, pitch, verticalSpeed, speed;
+        float yaw, pitch, verticalSpeed;
+        float carVerticalSpeed, steering, bodyPitch, bodyRoll;
+        float lastDrivingLook;
+        bool carGrounded = true;
+        Transform carBody;
         float lastEscape = -10f, quitHintUntil;
         const float WalkSpeed = 5f;
         readonly Collider[] exitHits = new Collider[16];
@@ -35,6 +43,13 @@ namespace KeepDriving
         {
             if (terrainStream) worldMap = terrainStream.GetComponent<WorldMap>();
             car.isKinematic = true;
+            carBody = car.transform.Find("Rectangle Body");
+            tyreSkid = car.gameObject.AddComponent<AudioSource>();
+            tyreSkid.playOnAwake = false;
+            tyreSkid.loop = true;
+            if (!tyreSkidClip) generatedTyreSkid = CreateTyreSkidClip();
+            tyreSkid.clip = tyreSkidClip ? tyreSkidClip : generatedTyreSkid;
+            tyreSkid.volume = 0f;
             car.interpolation = RigidbodyInterpolation.Interpolate;
             if (terrainStream && terrainStream.HasSource)
             {
@@ -139,9 +154,10 @@ namespace KeepDriving
                 }
             }
 
-            if (!driving && zoom != 0) minimap.Zoom(zoom);
+            if (zoom != 0) minimap.Zoom(zoom);
 
             Vector2 look = mouse != null ? mouse.delta.ReadValue() * .12f : Vector2.zero;
+            if (driving && look.sqrMagnitude > 0f) lastDrivingLook = Time.unscaledTime;
             yaw += look.x;
             pitch = Mathf.Clamp(pitch - look.y, -75f, 75f);
             if (keys.eKey.wasPressedThisFrame)
@@ -208,39 +224,98 @@ namespace KeepDriving
             if (terrainStream && terrainStream.ShiftOriginIfNeeded(focus) && skidMarks != null)
                 foreach (var mark in skidMarks) mark.Clear();
 
-            Vector2 input = driving ? ReadMovement() : Vector2.zero;
-            bool braking = !driving || (Keyboard.current != null && Keyboard.current.spaceKey.isPressed);
+            float dt = Time.fixedDeltaTime;
+            var keys = Keyboard.current;
+            float throttle = driving && keys != null ? Axis(keys.wKey.isPressed, keys.sKey.isPressed) : 0f;
+            float steer = driving && keys != null ? Axis(keys.dKey.isPressed, keys.aKey.isPressed) : 0f;
+            bool handbrake = !driving || keys?.spaceKey.isPressed == true;
+            steering = Mathf.MoveTowards(steering, steer, 5f * dt);
+
             Vector3 forward = Vector3.ProjectOnPlane(car.rotation * Vector3.forward, Vector3.up).normalized;
-            carVelocity = CarMotion.Step(carVelocity, forward, input.y, driving && ShiftHeld, braking, Time.fixedDeltaTime);
-            speed = Vector3.Dot(carVelocity, forward);
-            float heading = car.rotation.eulerAngles.y + input.x * 85f * Mathf.Clamp(speed / 5f, -1, 1) * Time.fixedDeltaTime;
-            Quaternion flat = Quaternion.Euler(0, heading, 0);
-            Vector3 next = car.position + carVelocity * Time.fixedDeltaTime;
-            skidding = driving && braking && carVelocity.magnitude > 5;
-            if (GroundAt(next, out var center))
+            float oldSpeed = Vector3.Dot(carVelocity, forward);
+            float traction = carGrounded && terrainStream && terrainStream.IsOnLandRoute(car.position) ? 1f : .76f;
+            if (carGrounded)
+                carVelocity = CarMotion.Step(carVelocity, forward, throttle, driving && ShiftHeld, handbrake, dt, traction);
+
+            float longitudinalSpeed = Vector3.Dot(carVelocity, forward);
+            float yawRate = carGrounded ? CarMotion.YawRate(steering, longitudinalSpeed, traction, handbrake) : 0f;
+            float heading = car.rotation.eulerAngles.y + yawRate * dt;
+            Quaternion flat = Quaternion.Euler(0f, heading, 0f);
+            Vector3 position = car.position;
+            Vector3 next = position + carVelocity * dt;
+
+            // A supported truck carries the vertical speed it gained climbing the slope.
+            // At a crest, the ground can fall away faster than gravity pulls the truck down.
+            float gravity = Physics.gravity.y;
+            float predictedHeight = position.y + (carVerticalSpeed + .5f * gravity * dt) * dt;
+            Quaternion rotation = car.rotation;
+            if (GroundPose(next, flat, dt, out float supportHeight, out Quaternion supportRotation)
+                && CarMotion.HasGroundContact(supportHeight, predictedHeight, carGrounded, carVelocity.magnitude))
             {
-                Vector3 normal = center.normal;
-                // Sample across the full car footprint so crests do not tip the body abruptly.
-                Vector3 front = next + flat * Vector3.forward * 2.2f;
-                Vector3 back = next - flat * Vector3.forward * 2.2f;
-                Vector3 right = next + flat * Vector3.right * .9f;
-                Vector3 left = next - flat * Vector3.right * .9f;
-                if (GroundAt(front, out var f) && GroundAt(back, out var b) && GroundAt(right, out var r) && GroundAt(left, out var l))
-                    normal = Vector3.Cross(f.point - b.point, r.point - l.point).normalized;
-                Quaternion rotation = Quaternion.LookRotation(Vector3.ProjectOnPlane(flat * Vector3.forward, normal), normal);
-                rotation = Quaternion.Slerp(car.rotation, rotation, 1f - Mathf.Exp(-10f * Time.fixedDeltaTime));
-                float height = center.point.y + .75f;
-                for (int x = -1; x <= 1; x += 2)
-                    for (int z = -1; z <= 1; z += 2)
-                    {
-                        Vector3 corner = rotation * new Vector3(x * .9f, -.7f, z * 2.2f);
-                        if (GroundAt(next + corner, out var support)) height = Mathf.Max(height, support.point.y - corner.y + .05f);
-                    }
-                next.y = height;
-                car.MoveRotation(rotation);
-                car.MovePosition(next);
+                next.y = supportHeight;
+                rotation = supportRotation;
+                carVerticalSpeed = carGrounded ? (supportHeight - position.y) / dt : 0f;
+                carGrounded = true;
             }
-            else { speed = 0; carVelocity = Vector3.zero; }
+            else
+            {
+                next.y = predictedHeight;
+                carVerticalSpeed += gravity * dt;
+                carGrounded = false;
+            }
+
+            if (terrainStream && terrainStream.HasSource && next.y < terrainStream.RecoveryHeight)
+            {
+                terrainStream.RestoreSourceTile();
+                next = terrainStream.VehicleSpawnPosition;
+                rotation = Quaternion.Euler(0f, terrainStream.SpawnHeading, 0f);
+                carVelocity = Vector3.zero;
+                carVerticalSpeed = 0f;
+                carGrounded = true;
+            }
+
+            car.MoveRotation(rotation);
+            car.MovePosition(next);
+
+            Vector3 headingForward = flat * Vector3.forward;
+            float lateralSpeed = Vector3.Dot(carVelocity, flat * Vector3.right);
+            float slip = Mathf.Atan2(Mathf.Abs(lateralSpeed), Mathf.Abs(Vector3.Dot(carVelocity, headingForward)) + .1f);
+            skidding = driving && carGrounded && carVelocity.sqrMagnitude > 25f
+                && Mathf.Abs(lateralSpeed) > 1.25f && slip > 7f * Mathf.Deg2Rad;
+            tyreSlip = skidding ? Mathf.InverseLerp(1.25f, 9f, Mathf.Abs(lateralSpeed)) : 0f;
+            float pitchTarget = carGrounded ? Mathf.Clamp(-(longitudinalSpeed - oldSpeed) / dt * .35f, -4f, 4f) : 0f;
+            float rollTarget = carGrounded ? Mathf.Clamp(yawRate * Mathf.Abs(longitudinalSpeed) * .009f, -6f, 6f) : 0f;
+            bodyPitch = Mathf.Lerp(bodyPitch, pitchTarget, 1f - Mathf.Exp(-7f * dt));
+            bodyRoll = Mathf.Lerp(bodyRoll, rollTarget, 1f - Mathf.Exp(-7f * dt));
+            if (carBody) carBody.localRotation = Quaternion.Euler(bodyPitch, 0f, bodyRoll);
+        }
+
+        static float Axis(bool positive, bool negative) => (positive ? 1f : 0f) - (negative ? 1f : 0f);
+
+        bool GroundPose(Vector3 next, Quaternion flat, float dt, out float height, out Quaternion rotation)
+        {
+            height = 0f;
+            rotation = car.rotation;
+            if (!GroundAt(next, out var center)) return false;
+
+            Vector3 forward = flat * Vector3.forward;
+            Vector3 right = flat * Vector3.right;
+            Vector3 normal = center.normal;
+            // The full footprint supports the chassis at hill crests and on uneven ground.
+            if (GroundAt(next + forward * 2.2f, out var f) && GroundAt(next - forward * 2.2f, out var b)
+                && GroundAt(next + right * .9f, out var r) && GroundAt(next - right * .9f, out var l))
+                normal = Vector3.Cross(f.point - b.point, r.point - l.point).normalized;
+            float tiltBlend = 1f - Mathf.Exp(-10f * dt);
+            Vector3 up = Vector3.Slerp(car.rotation * Vector3.up, normal, tiltBlend);
+            rotation = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, up), up);
+            height = center.point.y + .75f;
+            for (int x = -1; x <= 1; x += 2)
+            for (int z = -1; z <= 1; z += 2)
+            {
+                Vector3 corner = rotation * new Vector3(x * .9f, -.7f, z * 2.2f);
+                if (GroundAt(next + corner, out var support)) height = Mathf.Max(height, support.point.y - corner.y + .05f);
+            }
+            return true;
         }
 
         bool GroundAt(Vector3 point, out RaycastHit ground)
@@ -260,8 +335,15 @@ namespace KeepDriving
 
         void LateUpdate()
         {
+            UpdateTyreAudio();
             if (ModalOpen) return;
 
+            if (driving && thirdPerson && Time.unscaledTime - lastDrivingLook > 1.25f)
+            {
+                float follow = 1f - Mathf.Exp(-3.5f * Time.deltaTime);
+                yaw = Mathf.LerpAngle(yaw, car.transform.eulerAngles.y, follow);
+                pitch = Mathf.Lerp(pitch, 12f, follow);
+            }
             Quaternion look = Quaternion.Euler(pitch, yaw, 0);
             Vector3 anchor = driving ? car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f)) : player.transform.position + Vector3.up * .65f;
             Vector3 position = anchor;
@@ -297,7 +379,8 @@ namespace KeepDriving
             player.enabled = false;
             EnsureDriver();
             yaw = car.rotation.eulerAngles.y;
-            pitch = 0;
+            pitch = 12f;
+            lastDrivingLook = Time.unscaledTime;
             _bOriginalThirdPersonState = thirdPerson;
             thirdPerson = true;
             UpdateVisibility();
@@ -305,6 +388,7 @@ namespace KeepDriving
 
         void TryExit()
         {
+            if (!carGrounded || carVelocity.sqrMagnitude > 4f) return;
             Vector3[] offsets = { Vector3.left * 1.8f, Vector3.right * 1.8f, Vector3.back * 3.3f, Vector3.forward * 3.3f };
             foreach (Vector3 offset in offsets)
             {
@@ -326,7 +410,8 @@ namespace KeepDriving
                 player.enabled = true;
                 verticalSpeed = 0;
                 driving = false;
-                speed = 0;
+                carVerticalSpeed = 0f;
+                steering = 0f;
                 carVelocity = Vector3.zero;
                 skidding = false;
                 if (!car.isKinematic) car.linearVelocity = Vector3.zero;
@@ -361,6 +446,35 @@ namespace KeepDriving
             var renderer = visual.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = playerVisual.sharedMaterial;
             return renderer;
+        }
+
+        void UpdateTyreAudio()
+        {
+            if (!tyreSkid) return;
+            float target = driving && !ModalOpen ? tyreSlip * .5f : 0f;
+            tyreSkid.volume = Mathf.MoveTowards(tyreSkid.volume, target, Time.unscaledDeltaTime * 3f);
+            if (tyreSkid.volume > 0f && !tyreSkid.isPlaying) tyreSkid.Play();
+            else if (tyreSkid.volume == 0f && tyreSkid.isPlaying) tyreSkid.Stop();
+        }
+
+        static AudioClip CreateTyreSkidClip()
+        {
+            const int sampleRate = 22050;
+            var samples = new float[sampleRate];
+            var random = new System.Random(81);
+            float fast = 0f, slow = 0f;
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float noise = (float)random.NextDouble() * 2f - 1f;
+                fast += (noise - fast) * .35f;
+                slow += (noise - slow) * .045f;
+                float edge = Mathf.Clamp01(Mathf.Min(i, samples.Length - 1 - i) / 80f);
+                samples[i] = (fast - slow) * edge * .75f;
+            }
+
+            var clip = AudioClip.Create("Generated tyre scrub", samples.Length, 1, sampleRate, false);
+            clip.SetData(samples, 0);
+            return clip;
         }
 
         void UpdateSkidMarks()
@@ -404,6 +518,8 @@ namespace KeepDriving
             terminalScreen?.Dispose();
             minimap.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
+            if (tyreSkid) Destroy(tyreSkid);
+            if (generatedTyreSkid) Destroy(generatedTyreSkid);
         }
 
         void OnGUI()
@@ -431,7 +547,7 @@ namespace KeepDriving
             }
 
             GUI.Box(new Rect(16, 16, 650, 80), driving
-                ? "DRIVING   |   WASD drive   ·   Shift faster   ·   Space brake/skid\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   M world map"
+                ? "DRIVING   |   W accelerate   ·   S brake/reverse   ·   A/D steer   ·   Shift boost   ·   Space handbrake\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   M world map   ·   = / - minimap zoom"
                 : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   M world map   ·   = / - minimap zoom");
 
             if (driving)
