@@ -34,14 +34,18 @@ namespace KeepDriving
         FieldReceiverUI fieldReceiver;
         TerminalScreen terminalScreen;
         Terminal activeTerminal;
-        readonly Minimap minimap = new Minimap();
+        Minimap minimap;
         WorldMap worldMap;
         bool skidding;
         bool ShiftHeld => Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
         void Start()
         {
-            if (terrainStream) worldMap = terrainStream.GetComponent<WorldMap>();
+            if (terrainStream)
+            {
+                worldMap = terrainStream.GetComponent<WorldMap>();
+                minimap = terrainStream.GetComponent<Minimap>();
+            }
             car.isKinematic = true;
             carBody = car.transform.Find("Rectangle Body");
             tyreSkid = car.gameObject.AddComponent<AudioSource>();
@@ -154,7 +158,7 @@ namespace KeepDriving
                 }
             }
 
-            if (zoom != 0) minimap.Zoom(zoom);
+            if (zoom != 0 && minimap) minimap.Zoom(zoom);
 
             Vector2 look = mouse != null ? mouse.delta.ReadValue() * .12f : Vector2.zero;
             if (driving && look.sqrMagnitude > 0f) lastDrivingLook = Time.unscaledTime;
@@ -516,7 +520,6 @@ namespace KeepDriving
         {
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
-            minimap.Dispose();
             if (skidMaterial) Destroy(skidMaterial);
             if (tyreSkid) Destroy(tyreSkid);
             if (generatedTyreSkid) Destroy(generatedTyreSkid);
@@ -559,7 +562,7 @@ namespace KeepDriving
 
             if (Event.current.type == EventType.Repaint)
             {
-                minimap.Draw(gameObject.scene, position, driving ? car.rotation.eulerAngles.y : yaw, terrainStream);
+                if (minimap) minimap.Draw(position, driving ? car.rotation.eulerAngles.y : yaw);
                 if (!driving)
                 {
                     const float radius = 2.5f;

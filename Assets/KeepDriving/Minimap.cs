@@ -1,15 +1,23 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace KeepDriving
 {
-    internal sealed class Minimap
+    [DisallowMultipleComponent]
+    [RequireComponent(typeof(TerrainStream))]
+    public sealed class Minimap : MonoBehaviour
     {
-        const int Resolution = 128;
-        const float MinRange = 10f;
-        const float MaxRange = 500 * 100; // 100 tiles by 100 tiles
-        const float PanStep = 16f;
+        [SerializeField, Min(1f), Tooltip("Initial minimap width in meters.")]
+        private float startingWidth = 300f;
+        [SerializeField, Min(1f), Tooltip("Minimum minimap width in meters.")]
+        private float minimumWidth = 10f;
+        [SerializeField, Min(1f), Tooltip("Maximum minimap width in meters.")]
+        private float maximumWidth = 50000f;
+
+        private const int Resolution = 128;
+        private const float PanStep = 16f;
+        private TerrainStream terrainStream;
+
         static readonly Color Frame = new(.05f, .09f, .085f, .96f);
         static readonly Color Rule = new(.32f, .43f, .38f);
         static readonly Color Text = new(.75f, .83f, .79f);
@@ -22,20 +30,34 @@ namespace KeepDriving
         readonly List<Vector3> mapSites = new();
         Node[] nodes = System.Array.Empty<Node>();
         Vector2 center;
-        float range = 300f;
+        float range;
         float nextNodeScan;
         Rect reliefBounds;
         YanorraMap.Elevation reliefElevation;
 
+        private void Awake()
+        {
+            terrainStream = GetComponent<TerrainStream>();
+            range = ClampWidth(startingWidth);
+        }
+
+        private float ClampWidth(float width)
+        {
+            float min = Mathf.Max(1f, minimumWidth);
+            return Mathf.Clamp(width, min, Mathf.Max(min, maximumWidth));
+        }
+
         public void Zoom(int direction)
         {
-            float nextRange = Mathf.Clamp(direction > 0 ? range * .5f : range * 2f, MinRange, MaxRange);
+            if (!isActiveAndEnabled || direction == 0) return;
+            float nextRange = ClampWidth(direction > 0 ? range * .5f : range * 2f);
             if (nextRange == range) return;
             range = nextRange;
         }
 
-        public void Draw(Scene scene, Vector3 position, float heading, TerrainStream terrainStream)
+        public void Draw(Vector3 position, float heading)
         {
+            if (!isActiveAndEnabled) return;
             if (!relief) Initialize();
             if (Time.unscaledTime >= nextNodeScan)
             {
@@ -75,7 +97,7 @@ namespace KeepDriving
                 terrainStream.DrawMapWaterBodies(map, world);
                 terrainStream.DrawMapRoutes(map, world);
             }
-            DrawNodes(scene, map, terrainStream);
+            DrawNodes(map);
             DrawIcon(arrow, Project(position, map), 18, heading, Mint);
 
             DrawIcon(diamond, new Vector2(map.x + 5, map.yMax + 13), 9, 0, Amber);
@@ -94,7 +116,7 @@ namespace KeepDriving
             }
         }
 
-        void DrawNodes(Scene scene, Rect map, TerrainStream terrainStream)
+        void DrawNodes(Rect map)
         {
             if (terrainStream)
             {
@@ -105,7 +127,7 @@ namespace KeepDriving
 
             foreach (Node node in nodes)
             {
-                if (!node || !node.gameObject.activeInHierarchy || node.gameObject.scene != scene) continue;
+                if (!node || !node.gameObject.activeInHierarchy || node.gameObject.scene != gameObject.scene) continue;
                 if (terrainStream && terrainStream.IsSpawnedMapSite(node)) continue;
                 DrawNode(node.transform.position, map);
             }
@@ -183,7 +205,7 @@ namespace KeepDriving
             GUI.color = previous;
         }
 
-        public void Dispose()
+        private void OnDestroy()
         {
             if (relief) Object.Destroy(relief);
             if (arrow) Object.Destroy(arrow);
