@@ -38,7 +38,7 @@ namespace KeepDriving
             }
         }
 
-        public WoodlandBiomes(TextAsset asset, int prefabCount)
+        public WoodlandBiomes(TextAsset asset, int prefabCount, string biomeType = "woodland", float baseDensity = BaseCellDensity)
         {
             _prefabCount = prefabCount;
             using var reader = JsonReaderWriterFactory.CreateJsonReader(asset.bytes, XmlDictionaryReaderQuotas.Max);
@@ -49,14 +49,14 @@ namespace KeepDriving
             foreach (var feature in collection.Element("features").Elements("item"))
             {
                 var properties = feature.Element("properties");
-                if (!string.Equals((string)properties?.Element("biome_type"), "woodland", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals((string)properties?.Element("biome_type"), biomeType, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 string raw = (string)properties.Element("vegetation_density");
                 float density = float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
                     && float.IsFinite(value) ? Mathf.Max(0, value) : 1f;
                 // Increasing multipliers approach the placement grid's physical capacity.
-                float chance = 1f - Mathf.Exp(-BaseCellDensity * density);
+                float chance = 1f - Mathf.Exp(-baseDensity * density);
                 var geometry = feature.Element("geometry");
                 var coordinates = geometry?.Element("coordinates");
                 if (coordinates == null) continue;
@@ -152,16 +152,64 @@ namespace KeepDriving
             return trees.ToArray();
         }
 
+        public List<int[,]> GenerateGrass(Vector2Int tile, int resolution, Func<Vector2, bool> excluded, CancellationToken token)
+        {
+            Rect bounds = TileBounds(tile);
+            var candidates = new List<Woodland>();
+            foreach (var area in _areas)
+                if (area.Chance > 0f && area.Bounds.Overlaps(bounds)) candidates.Add(area);
+            if (candidates.Count == 0 || _prefabCount == 0) return null;
+
+            List<int[,]> layers = null;
+            for (int z = 0; z < resolution; z++)
+            {
+                token.ThrowIfCancellationRequested();
+                for (int x = 0; x < resolution; x++)
+                {
+                    float east = bounds.xMin + (x + .5f) * bounds.width / resolution;
+                    float north = bounds.yMin + (z + .5f) * bounds.height / resolution;
+                    var point = new Vector2(east, north);
+                    float coverage = 0;
+                    foreach (var area in candidates)
+                        if (area.Chance > coverage && area.Contains(point)) coverage = area.Chance;
+                    if (coverage == 0 || excluded(point)) continue;
+
+                    int cellX = tile.x * resolution + x, cellZ = tile.y * resolution + z;
+                    int count = Mathf.FloorToInt(coverage * 12f + Random01(cellX, cellZ, 11));
+                    if (count == 0) continue;
+                    if (layers == null)
+                    {
+                        layers = new List<int[,]>(_prefabCount);
+                        for (int i = 0; i < _prefabCount; i++) layers.Add(new int[resolution, resolution]);
+                    }
+                    int variant = (int)(Random01(cellX, cellZ, 12) * _prefabCount);
+                    layers[variant][z, x] = count;
+                }
+            }
+            return layers;
+        }
+
         public void ShadeMap(Color32[] pixels, int resolution, Rect view)
         {
-            var crossings = new List<float>();
-            var tint = new Color(.07f, .29f, .14f);
-            float step = view.width / resolution;
             bool[] shaded = null;
+            var tint = new Color(.07f, .29f, .14f);
+            Rasterize(resolution, view, (row, column) =>
+            {
+                shaded ??= new bool[pixels.Length];
+                int index = row * resolution + column;
+                if (shaded[index]) return;
+                shaded[index] = true;
+                pixels[index] = Color.Lerp(pixels[index], tint, .56f);
+            });
+        }
+
+        public void Rasterize(int resolution, Rect view, Action<int, int> visit)
+        {
+            var crossings = new List<float>();
+            float step = view.width / resolution;
             foreach (var area in _areas)
             {
                 if (!area.Bounds.Overlaps(view)) continue;
-                shaded ??= new bool[pixels.Length];
                 int firstRow = Mathf.Max(0, Mathf.CeilToInt((area.Bounds.yMin - view.yMin) / step - .5f));
                 int lastRow = Mathf.Min(resolution, Mathf.CeilToInt((area.Bounds.yMax - view.yMin) / step - .5f));
                 for (int row = firstRow; row < lastRow; row++)
@@ -183,13 +231,7 @@ namespace KeepDriving
                         float east = Mathf.Min(YanorraMap.WorldSize, crossings[i + 1]);
                         int first = Mathf.Max(0, Mathf.CeilToInt((west - view.xMin) / step - .5f));
                         int last = Mathf.Min(resolution, Mathf.CeilToInt((east - view.xMin) / step - .5f));
-                        for (int column = first; column < last; column++)
-                        {
-                            int index = row * resolution + column;
-                            if (shaded[index]) continue;
-                            shaded[index] = true;
-                            pixels[index] = Color.Lerp(pixels[index], tint, .56f);
-                        }
+                        for (int column = first; column < last; column++) visit(row, column);
                     }
                 }
             }

@@ -27,8 +27,25 @@ namespace KeepDriving
         [SerializeField, Tooltip("Tree prefabs used inside Woodland polygons.")]
         private GameObject[] woodlandTreePrefabs = Array.Empty<GameObject>();
 
+        [Header("Grassland")]
+        [SerializeField, Tooltip("Optional grass mesh prefabs used as instanced terrain details.")]
+        private GameObject[] grasslandGrassPrefabs = Array.Empty<GameObject>();
+        [SerializeField, Tooltip("Grass clump textures used as terrain billboards.")]
+        private Texture2D[] grasslandGrassTextures = Array.Empty<Texture2D>();
+
         [SerializeField, Min(1), Tooltip("Tiles per side, including the player's tile. Even values round up so the grid stays centered.")]
         private int streamingGridSize = 5;
+
+        [Header("Biome Ground")]
+        [SerializeField] private Texture2D grassAndWoodlandGround;
+        [SerializeField] private Texture2D scrubAndBarrenGround;
+
+        private const int BiomePaintResolution = 128;
+        private const byte WetlandMask = 4;
+        private const float WetlandOpacity = .42f;
+        private readonly List<(WoodlandBiomes Area, byte Surface)> _groundBiomes = new();
+        private TerrainLayer[] _biomeLayers;
+        private Texture2D _wetlandTint;
 
         private int WindowRadius => Mathf.Max(1, streamingGridSize) / 2;
         private const float OriginShiftDistance = 1600f;
@@ -64,9 +81,12 @@ namespace KeepDriving
         private static readonly ProfilerMarker UnloadTilesMarker = new("TerrainStream.UnloadTiles");
         private static readonly ProfilerMarker AttachRoutesMarker = new("TerrainStream.AttachRoutes");
         private static readonly ProfilerMarker CarveWaterMarker = new("TerrainStream.CarveWater");
+        private const int GrassDetailResolution = 128;
+        private WoodlandBiomes _grassland;
+        private DetailPrototype[] _grassPrototypes;
         private WoodlandBiomes _woodland;
         private TreePrototype[] _woodlandPrototypes;
-        private Task<(float[,] Ground, float[,] Carved, TreeInstance[] Trees)> _pendingHeights;
+        private Task<(float[,] Ground, float[,] Carved, TreeInstance[] Trees, List<int[,]> Grass, byte[,] Paint)> _pendingHeights;
         private Vector2Int _pendingKey;
         private float _retryAfter;
 
@@ -134,11 +154,19 @@ namespace KeepDriving
                     Debug.LogWarning("The procedural water shader is missing.", this);
             }
             LoadWoodland();
+            LoadGrassland();
+            LoadBiomeGround();
             var startingTrees = PrepareWoodland(_spawn.Tile, CancellationToken.None);
-            if (HasWater(_spawn.Tile) || startingTrees is { Length: > 0 }) CreateStartingTerrain();
+            var startingGrass = PrepareGrassland(_spawn.Tile,
+                _sourceData.detailResolution > 0 ? _sourceData.detailResolution : GrassDetailResolution, CancellationToken.None);
+            var startingPaint = PrepareBiomePaint(_spawn.Tile, _sourceData.alphamapResolution);
+            if (HasWater(_spawn.Tile) || startingTrees is { Length: > 0 } || startingGrass != null || startingPaint != null)
+                CreateStartingTerrain();
+            ApplyBiomePaint(_startingTerrain.terrainData, startingPaint);
             _tiles.Add(_spawn.Tile, _startingTerrain);
             AttachRoutes(_spawn.Tile, _startingTerrain, carveStartingTerrain: true);
             InstallWoodland(_startingTerrain, startingTrees);
+            InstallGrassland(_startingTerrain, startingGrass);
             InstallSites(_spawn.Tile, _startingTerrain);
         }
 
@@ -282,12 +310,13 @@ namespace KeepDriving
                 else if (!completed.IsCanceled && Contains(_pendingKey, min, max))
                 {
                     using var sample = InstallTileMarker.Auto();
-                    var (ground, carved, trees) = completed.Result;
-                    Terrain terrain = CreateTile(_pendingKey, ground);
+                    var (ground, carved, trees, grass, paint) = completed.Result;
+                    Terrain terrain = CreateTile(_pendingKey, ground, paint);
                     _tiles.Add(_pendingKey, terrain);
 
                     AttachRoutes(_pendingKey, terrain, carved);
                     InstallWoodland(terrain, trees);
+                    InstallGrassland(terrain, grass);
                     InstallSites(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
@@ -374,25 +403,27 @@ namespace KeepDriving
 
         private Terrain Find(Vector2Int key) => _tiles.TryGetValue(key, out var terrain) ? terrain : null;
 
-        private (float[,] Ground, float[,] Carved, TreeInstance[] Trees) PrepareTile(Vector2Int key, CancellationToken token)
+        private (float[,] Ground, float[,] Carved, TreeInstance[] Trees, List<int[,]> Grass, byte[,] Paint) PrepareTile(Vector2Int key, CancellationToken token)
         {
             using var sample = PrepareTileMarker.Auto();
             var ground = SampleTile(key, token);
             token.ThrowIfCancellationRequested();
             var trees = PrepareWoodland(key, token);
-            if (!HasWater(key)) return (ground, null, trees);
+            var grass = PrepareGrassland(key, GrassDetailResolution, token);
+            var paint = PrepareBiomePaint(key, BiomePaintResolution);
+            if (!HasWater(key)) return (ground, null, trees, grass, paint);
 
             foreach (var water in _waterways)
             {
                 if (!water.Surface.HasChannel(key)) continue;
                 var carved = (float[,])ground.Clone();
                 CarveWater(key, _baseY, _heightRange, carved);
-                return (ground, carved, trees);
+                return (ground, carved, trees, grass, paint);
             }
 
             // Lake meshes have their own waterline and need no original terrain upload.
             CarveWater(key, _baseY, _heightRange, ground);
-            return (ground, null, trees);
+            return (ground, null, trees, grass, paint);
         }
 
         private float[,] SampleTile(Vector2Int key, CancellationToken token)
@@ -437,7 +468,7 @@ namespace KeepDriving
             return _origin.y + Mathf.Lerp(a, b, z - z0) * _sourceHeightSize;
         }
 
-        private Terrain CreateTile(Vector2Int key, float[,] heights)
+        private Terrain CreateTile(Vector2Int key, float[,] heights, byte[,] biomePaint)
         {
             var layers = _sourceData.terrainLayers;
             var data = new TerrainData
@@ -449,13 +480,16 @@ namespace KeepDriving
             data.SetHeights(0, 0, heights);
             if (layers.Length > 0)
             {
-                data.alphamapResolution = 16;
-                var paint = new float[16, 16, layers.Length];
-                for (int z = 0; z < 16; z++)
-                for (int x = 0; x < 16; x++)
+                data.alphamapResolution = biomePaint?.GetLength(0) ?? 16;
+                int resolution = data.alphamapResolution;
+                var paint = new float[resolution, resolution, layers.Length];
+                for (int z = 0; z < resolution; z++)
+                for (int x = 0; x < resolution; x++)
                     paint[z, x, 0] = 1;
                 data.SetAlphamaps(0, 0, paint);
             }
+
+            ApplyBiomePaint(data, biomePaint);
 
             GameObject tile = Terrain.CreateTerrainGameObject(data);
             SceneManager.MoveGameObjectToScene(tile, gameObject.scene);
@@ -527,6 +561,8 @@ namespace KeepDriving
             terrain.drawInstanced = _source.drawInstanced;
             terrain.heightmapPixelError = _source.heightmapPixelError;
             terrain.materialTemplate = _source.materialTemplate;
+            terrain.detailObjectDistance = _source.detailObjectDistance;
+            terrain.detailObjectDensity = _source.detailObjectDensity;
         }
 
         private void InstallSites(Vector2Int key, Terrain terrain)
@@ -552,6 +588,77 @@ namespace KeepDriving
             }
         }
 
+        private void LoadBiomeGround()
+        {
+            if (!biomesGeoJson || !grassAndWoodlandGround || !scrubAndBarrenGround) return;
+            try
+            {
+                _groundBiomes.Add((new WoodlandBiomes(biomesGeoJson, 0, "grassland"), 1));
+                _groundBiomes.Add((new WoodlandBiomes(biomesGeoJson, 0, "woodland"), 1));
+                _groundBiomes.Add((new WoodlandBiomes(biomesGeoJson, 0, "scrubland"), 2));
+                _groundBiomes.Add((new WoodlandBiomes(biomesGeoJson, 0, "barren ground"), 2));
+                _groundBiomes.Add((new WoodlandBiomes(biomesGeoJson, 0, "wetland"), WetlandMask));
+                _wetlandTint = new Texture2D(1, 1, TextureFormat.RGBA32, false) { name = "Wetland blue tint" };
+                _wetlandTint.SetPixel(0, 0, new Color(.18f, .48f, .61f));
+                _wetlandTint.Apply(false, true);
+                _biomeLayers = new[]
+                {
+                    CreateBiomeLayer("Grassland and Woodland", grassAndWoodlandGround),
+                    CreateBiomeLayer("Scrubland and Barren Ground", scrubAndBarrenGround),
+                    CreateBiomeLayer("Wetland Tint", _wetlandTint)
+                };
+            }
+            catch (Exception error)
+            {
+                _groundBiomes.Clear();
+                Debug.LogWarning($"Could not load biome ground textures: {error.Message}", this);
+            }
+        }
+
+        private static TerrainLayer CreateBiomeLayer(string name, Texture2D texture) =>
+            new TerrainLayer { name = name, diffuseTexture = texture, tileSize = new Vector2(8f, 8f) };
+
+        private byte[,] PrepareBiomePaint(Vector2Int key, int resolution)
+        {
+            byte[,] mask = null;
+            var bounds = new Rect(key.x * TileSize, key.y * TileSize, TileSize, TileSize);
+            foreach (var biome in _groundBiomes)
+                biome.Area.Rasterize(resolution, bounds, (row, column) =>
+                {
+                    mask ??= new byte[resolution, resolution];
+                    if (biome.Surface == WetlandMask) mask[row, column] |= WetlandMask;
+                    else mask[row, column] = biome.Surface;
+                });
+            return mask;
+        }
+
+        private void ApplyBiomePaint(TerrainData data, byte[,] mask)
+        {
+            if (mask == null) return;
+            int resolution = mask.GetLength(0);
+            if (data.alphamapResolution != resolution) data.alphamapResolution = resolution;
+            var existing = data.terrainLayers;
+            float[,,] original = existing.Length > 0 ? data.GetAlphamaps(0, 0, resolution, resolution) : null;
+            int baseCount = existing.Length;
+            var layers = new List<TerrainLayer>(existing);
+            layers.AddRange(_biomeLayers);
+            var paint = new float[resolution, resolution, layers.Count];
+            for (int z = 0; z < resolution; z++)
+            for (int x = 0; x < resolution; x++)
+            {
+                int surface = mask[z, x] & (WetlandMask - 1);
+                bool wetland = (mask[z, x] & WetlandMask) != 0;
+                float dryWeight = wetland ? 1f - WetlandOpacity : 1f;
+                if (surface > 0 || original == null)
+                    paint[z, x, baseCount + Mathf.Max(0, surface - 1)] = dryWeight;
+                else
+                    for (int i = 0; i < baseCount; i++) paint[z, x, i] = original[z, x, i] * dryWeight;
+                if (wetland) paint[z, x, baseCount + 2] = WetlandOpacity;
+            }
+            data.terrainLayers = layers.ToArray();
+            data.SetAlphamaps(0, 0, paint);
+        }
+
         private void LoadWoodland()
         {
             if (!biomesGeoJson) return;
@@ -573,18 +680,71 @@ namespace KeepDriving
         private TreeInstance[] PrepareWoodland(Vector2Int key, CancellationToken token)
         {
             if (_woodland == null || _woodlandPrototypes.Length == 0 || !_woodland.OverlapsTile(key)) return null;
+            return _woodland.GenerateTile(key, point => ExcludeVegetation(key, point), token);
+        }
+
+        private bool ExcludeVegetation(Vector2Int key, Vector2 point)
+        {
             var spawn = new Vector2((float)_spawn.East, (float)_spawn.North);
-            return _woodland.GenerateTile(key, point =>
+            if ((point - spawn).sqrMagnitude < 12f * 12f) return true;
+            foreach (var route in _landRoutes)
+                if (route.Surface.ContainsRoute(key, point, includeBuffer: true)) return true;
+            foreach (var water in _waterways)
+                if (water.Surface.ContainsChannel(key, point)) return true;
+            foreach (var body in _waterBodies)
+                if (body.ContainsPoint(point)) return true;
+            return false;
+        }
+
+        private void LoadGrassland()
+        {
+            if (!biomesGeoJson) return;
+            var prototypes = new List<DetailPrototype>();
+            foreach (GameObject prefab in grasslandGrassPrefabs ?? Array.Empty<GameObject>())
+                if (prefab && !prefab.scene.IsValid())
+                    prototypes.Add(new DetailPrototype { prototype = prefab, usePrototypeMesh = true,
+                        renderMode = DetailRenderMode.VertexLit, useInstancing = true, noiseSeed = 17 + prototypes.Count });
+            foreach (Texture2D texture in grasslandGrassTextures ?? Array.Empty<Texture2D>())
+                if (texture)
+                    prototypes.Add(new DetailPrototype { prototypeTexture = texture, renderMode = DetailRenderMode.GrassBillboard,
+                        noiseSeed = 17 + prototypes.Count, minWidth = .55f, maxWidth = 1.1f,
+                        minHeight = .45f, maxHeight = .9f, healthyColor = Color.white,
+                        dryColor = new Color(.87f, .79f, .60f) });
+            if (prototypes.Count == 0) return;
+            try
             {
-                if ((point - spawn).sqrMagnitude < 12f * 12f) return true;
-                foreach (var route in _landRoutes)
-                    if (route.Surface.ContainsRoute(key, point, includeBuffer: true)) return true;
-                foreach (var water in _waterways)
-                    if (water.Surface.ContainsChannel(key, point)) return true;
-                foreach (var body in _waterBodies)
-                    if (body.ContainsPoint(point)) return true;
-                return false;
-            }, token);
+                _grassland = new WoodlandBiomes(biomesGeoJson, prototypes.Count, "grassland", .75f);
+                _grassPrototypes = prototypes.ToArray();
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Could not load grassland biomes: {error.Message}", this);
+            }
+        }
+
+        private List<int[,]> PrepareGrassland(Vector2Int key, int resolution, CancellationToken token) =>
+            _grassland?.GenerateGrass(key, resolution, point => ExcludeVegetation(key, point), token);
+
+        private void InstallGrassland(Terrain terrain, List<int[,]> layers)
+        {
+            if (layers == null) return;
+            TerrainData data = terrain.terrainData;
+            int resolution = layers[0].GetLength(0);
+            var existing = data.detailPrototypes;
+            var previousLayers = new List<int[,]>(existing.Length);
+            if (data.detailResolution > 0)
+                for (int i = 0; i < existing.Length; i++)
+                    previousLayers.Add(data.GetDetailLayer(0, 0, resolution, resolution, i));
+            else
+                data.SetDetailResolution(resolution, 16);
+
+            var prototypes = new List<DetailPrototype>(existing);
+            prototypes.AddRange(_grassPrototypes);
+            data.detailPrototypes = prototypes.ToArray();
+            for (int i = 0; i < previousLayers.Count; i++)
+                data.SetDetailLayer(0, 0, i, previousLayers[i]);
+            for (int i = 0; i < layers.Count; i++)
+                data.SetDetailLayer(0, 0, existing.Length + i, layers[i]);
         }
 
         private void InstallWoodland(Terrain terrain, TreeInstance[] trees)
@@ -737,6 +897,9 @@ namespace KeepDriving
             foreach (var route in _landRoutes) Destroy(route.Material);
             foreach (var water in _waterways) Destroy(water.Material);
             foreach (var body in _waterBodies) body.Dispose();
+            if (_biomeLayers != null)
+                foreach (var layer in _biomeLayers) Destroy(layer);
+            if (_wetlandTint) Destroy(_wetlandTint);
             if (_sitesRoot) Destroy(_sitesRoot);
         }
     }
