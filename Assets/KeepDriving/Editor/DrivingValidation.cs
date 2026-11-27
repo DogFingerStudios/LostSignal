@@ -46,16 +46,26 @@ namespace KeepDriving.Editor
             for (int i = 0; i < 500; i++) brake = motion.Step(brake, angled, 1, true, true, .02f);
             Check(brake == Vector3.zero, "Holding brake reaches a stable stop");
             Call(game, "Enter");
-            var driver = game.car.transform.Find("Seated Driver Capsule");
-            Check(driver && driver.GetComponent<Collider>() == null, "Seated visual has no interfering collider");
-            Check(driver.GetComponent<Renderer>().bounds.max.y > game.car.GetComponent<Collider>().bounds.max.y, "Driver upper capsule above car body");
+            var driver = game.car.transform.Find("Rectangle Body/Seated Bubba");
+            Check(driver && driver.gameObject.activeInHierarchy, "Seated Bubba is mounted to the chassis");
+            foreach (var collider in driver.GetComponentsInChildren<Collider>(true))
+                Check(!collider.enabled, "Seated visual has no interfering collider");
+            var thigh = driver.Find("Armature/Skeleton/Handyman/Handyman Pelvis/Handyman L Thigh");
+            var knee = thigh ? thigh.Find("Handyman L Calf") : null;
+            Check(knee && Vector3.Dot((knee.position - thigh.position).normalized, game.car.transform.forward) > .7f,
+                "Driver's knee points forward in the seated pose");
             var third = typeof(PrototypeController).GetField("thirdPerson", BindingFlags.NonPublic | BindingFlags.Instance);
+            var headRenderers = (Renderer[])typeof(PrototypeController)
+                .GetField("seatedHeadRenderers", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(game);
+            Check(headRenderers.Length > 0, "Driver head meshes found");
             third.SetValue(game, true); Call(game, "UpdateVisibility");
-            Check(driver.GetComponent<Renderer>().enabled, "Driver visible in third person");
+            foreach (var renderer in headRenderers)
+                Check(!renderer.forceRenderingOff, "Driver head visible in third person");
             third.SetValue(game, false); Call(game, "UpdateVisibility");
-            Check(game.car.transform.Find("First Person Torso").GetComponent<Renderer>().enabled, "First-person torso visible");
+            foreach (var renderer in headRenderers)
+                Check(renderer.forceRenderingOff, "Driver head hidden in first person");
             Call(game, "TryExit");
-            Check(!driver.GetComponent<Renderer>().enabled, "Driver disappears on exit");
+            Check(!driver.gameObject.activeSelf, "Driver disappears on exit");
             SlopeValidation.Validate();
             Debug.Log($"DRIVING_VALIDATION_PASSED: normal={normal.magnitude:F1}m/s boost={boosted.magnitude:F1}m/s, inertia, friction, brake priority, lateral skid, full stop, seated driver, slopes");
         }

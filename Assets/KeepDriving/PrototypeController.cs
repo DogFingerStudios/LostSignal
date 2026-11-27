@@ -11,6 +11,8 @@ namespace KeepDriving
         public Renderer playerVisual;
         [SerializeField] GameObject walkingCharacterPrefab;
         [SerializeField] RuntimeAnimatorController walkingAnimatorController;
+        [SerializeField] AnimationClip seatedDriverPose;
+        [SerializeField] Vector3 driverHeadPosition = new Vector3(-.48f, 1.14f, 1.24f);
         Animator walkingAnimator;
         int walkingState;
         static readonly int IdleState = Animator.StringToHash("Base Layer.Idle");
@@ -43,6 +45,8 @@ namespace KeepDriving
         const float TreeContactGap = .02f;
         readonly RaycastHit[] cameraHits = new RaycastHit[32];
         Vector3 carVelocity;
+        GameObject seatedCharacter;
+        Renderer[] seatedHeadRenderers;
         Renderer seatedDriver, seatedTorso;
         TrailRenderer[] skidMarks;
         Material skidMaterial;
@@ -455,7 +459,13 @@ namespace KeepDriving
                 pitch = Mathf.Lerp(pitch, 12f, follow);
             }
             Quaternion look = Quaternion.Euler(pitch, yaw, 0);
-            Vector3 anchor = driving ? car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f)) : player.transform.position + Vector3.up * .65f;
+            Vector3 anchor = player.transform.position + Vector3.up * .65f;
+            if (driving)
+            {
+                anchor = seatedCharacter
+                    ? seatedCharacter.transform.parent.TransformPoint(driverHeadPosition + new Vector3(0f, .08f, .12f))
+                    : car.transform.TransformPoint(new Vector3(-.4f, 1.15f, .25f));
+            }
             Vector3 position = anchor;
             if (thirdPerson)
             {
@@ -578,15 +588,66 @@ namespace KeepDriving
                 walkingAnimator.gameObject.SetActive(showWalkingVisual);
                 walkingState = 0;
             }
+            if (seatedCharacter)
+            {
+                seatedCharacter.SetActive(driving);
+                foreach (var renderer in seatedHeadRenderers)
+                    renderer.forceRenderingOff = !thirdPerson;
+            }
             if (seatedDriver) seatedDriver.enabled = driving && thirdPerson;
             if (seatedTorso) seatedTorso.enabled = driving && !thirdPerson;
         }
 
         void EnsureDriver()
         {
-            if (seatedDriver) return;
+            if (seatedCharacter || seatedDriver) return;
+            if (walkingCharacterPrefab && seatedDriverPose && TryCreateSeatedCharacter()) return;
+
             seatedDriver = DriverMesh("Seated Driver Capsule", new Vector3(-.4f, .65f, .15f), new Vector3(.7f, .65f, .7f));
             seatedTorso = DriverMesh("First Person Torso", new Vector3(-.4f, .45f, .15f), new Vector3(.7f, .3f, .7f));
+        }
+
+        bool TryCreateSeatedCharacter()
+        {
+            // Mount to the chassis visual so the driver follows its pitch and roll.
+            Transform mount = carBody ? carBody : car.transform.Find("Rectangle Body");
+            if (!mount) mount = car.transform;
+            var character = Instantiate(walkingCharacterPrefab, mount, false);
+            character.name = "Seated Bubba";
+            character.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+
+            var animator = character.GetComponent<Animator>();
+            Transform head = animator && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
+            if (!head)
+            {
+                character.SetActive(false);
+                Destroy(character);
+                return false;
+            }
+
+            foreach (var collider in character.GetComponentsInChildren<Collider>(true))
+                collider.enabled = false;
+
+            // The preview clip keys the skeleton directly. Sample and hold its final frame.
+            animator.enabled = false;
+            animator.runtimeAnimatorController = null;
+            animator.avatar = null;
+            seatedDriverPose.SampleAnimation(character, seatedDriverPose.length);
+            character.transform.localPosition += driverHeadPosition - mount.InverseTransformPoint(head.position);
+
+            var headRenderers = new System.Collections.Generic.List<Renderer>();
+            foreach (var renderer in character.GetComponentsInChildren<Renderer>(true))
+            {
+                string meshName = renderer.gameObject.name;
+                if (meshName.StartsWith("Head1_", System.StringComparison.Ordinal)
+                    || meshName.StartsWith("haircut_", System.StringComparison.Ordinal)
+                    || meshName.StartsWith("helmet_", System.StringComparison.Ordinal)
+                    || meshName.StartsWith("cap_", System.StringComparison.Ordinal))
+                    headRenderers.Add(renderer);
+            }
+            seatedHeadRenderers = headRenderers.ToArray();
+            seatedCharacter = character;
+            return true;
         }
 
         Renderer DriverMesh(string name, Vector3 position, Vector3 scale)
@@ -670,6 +731,7 @@ namespace KeepDriving
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
             if (walkingAnimator) Destroy(walkingAnimator.gameObject);
+            if (seatedCharacter) Destroy(seatedCharacter);
             if (skidMaterial) Destroy(skidMaterial);
             if (tyreSkid) Destroy(tyreSkid);
             if (generatedTyreSkid) Destroy(generatedTyreSkid);

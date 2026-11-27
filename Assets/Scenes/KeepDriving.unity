@@ -838,6 +838,8 @@ MonoBehaviour:
   playerVisual: {fileID: 2055955581}
   walkingCharacterPrefab: {fileID: 5865036580105156138, guid: c7bcbed7f2759b3468c9deb0b2e59857, type: 3}
   walkingAnimatorController: {fileID: 9100000, guid: 273a8c2d9e0c44c58a885abb42b2ef79, type: 2}
+  seatedDriverPose: {fileID: 7400000, guid: 7ecac0e6366f77f4f9c87a1afd553939, type: 2}
+  driverHeadPosition: {x: -0.48, y: 1.14, z: 1.24}
   car: {fileID: 245214888}
   view: {fileID: 63276286}
   horn: {fileID: 245214887}
