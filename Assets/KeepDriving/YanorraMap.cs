@@ -52,10 +52,9 @@ namespace KeepDriving
 
             public Point(Feature feature)
             {
-                var coordinates = feature?.geometry?.coordinates;
-                if (feature?.geometry?.type != "Point" || coordinates == null || coordinates.Length < 2 ||
-                    !WithinMap(coordinates[0]) || !WithinMap(coordinates[1]))
+                if (!HasMapPoint(feature))
                     throw new FormatException("Expected a Point in Yanorra grid meters within the world boundary.");
+                var coordinates = feature.geometry.coordinates;
 
                 East = coordinates[0];
                 North = coordinates[1];
@@ -71,6 +70,14 @@ namespace KeepDriving
 
         private static bool WithinMap(double value) => value >= 0 && value <= WorldSize;
 
+        private static bool HasMapPoint(Feature feature)
+        {
+            var geometry = feature?.geometry;
+            var coordinates = geometry?.coordinates;
+            return geometry?.type == "Point" && coordinates != null && coordinates.Length >= 2
+                && WithinMap(coordinates[0]) && WithinMap(coordinates[1]);
+        }
+
         private static Feature[] ReadFeatures(TextAsset asset)
         {
             if (!asset) throw new InvalidOperationException("A Yanorra GeoJSON asset is missing.");
@@ -85,6 +92,23 @@ namespace KeepDriving
             var features = ReadFeatures(asset);
             if (features.Length != 1) throw new FormatException("spawn_point.geojson must contain exactly one point.");
             return new Point(features[0]);
+        }
+
+        public static List<Point> ReadWorkTruckSites(TextAsset asset)
+        {
+            var points = new List<Point>();
+            foreach (var feature in ReadFeatures(asset))
+            {
+                if (feature?.properties?.site_type != "WorkTruck") continue;
+                if (!HasMapPoint(feature))
+                {
+                    var label = feature.properties.name ?? feature.properties.id ?? "(unnamed)";
+                    Debug.LogWarning($"Skipping WorkTruck site '{label}' in {asset.name}. It needs a point within the Yanorra grid.");
+                    continue;
+                }
+                points.Add(new Point(feature));
+            }
+            return points;
         }
 
         public static Dictionary<Vector2Int, List<Point>> ReadSites(TextAsset asset)

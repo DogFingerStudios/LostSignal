@@ -16,6 +16,8 @@ namespace KeepDriving
 
         [SerializeField] private List<MapMarker> trackedMarkers = new();
 
+        internal void TrackMarker(MapMarker marker) => trackedMarkers.Add(marker);
+
         private const float PanStep = 16f;
         private TerrainStream terrainStream;
 

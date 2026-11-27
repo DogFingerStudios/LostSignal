@@ -13,6 +13,8 @@
 { "type": "Feature", "properties": { "id": "{602833de-0838-4e9b-8aa5-91063cb60585}", "name": "HC-205004", "site_type": "Horizon Chain node", "heading_deg": 0.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74769.38694308, 101403.92129832 ] } },
 { "type": "Feature", "properties": { "id": "{1d0b4d67-f48f-45a1-93fa-cf62a3c21a5e}", "name": "HC-205006", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 75354.23046027, 104507.17927922 ] } },
 { "type": "Feature", "properties": { "id": "{19c39843-ad3b-4dfd-9728-6d712f356b20}", "name": "HC-205008", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 161772.32612814, 169195.05533217 ] } },
-{ "type": "Feature", "properties": { "id": "{32cb1c85-3a93-44c0-b8f1-d3eb69adf899}", "name": "HC-205007", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 119293.76114619, 121575.47049463 ] } }
+{ "type": "Feature", "properties": { "id": "{32cb1c85-3a93-44c0-b8f1-d3eb69adf899}", "name": "HC-205007", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 119293.76114619, 121575.47049463 ] } },
+{ "type": "Feature", "properties": { "id": "{b1684b97-4f09-47f4-8bdf-87673b4483c1}", "name": "Truck99", "site_type": "WorkTruck", "heading_deg": 90.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74368.57009539, 101215.90755134 ] } },
+{ "type": "Feature", "properties": { "id": "{eebdaca6-7483-4d9c-9ec3-0098ffad8562}", "name": "Truck88", "site_type": "WorkTruck", "heading_deg": 45.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74401.76282269, 101188.80355132 ] } }
 ]
 }

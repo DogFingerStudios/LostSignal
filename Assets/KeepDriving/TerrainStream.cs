@@ -51,6 +51,7 @@ namespace KeepDriving
         private const float OriginShiftDistance = 1600f;
         private const float RiverDepth = 10f, StreamDepth = 5f, SeasonalStreamDepth = 1f;
         private const float RoadsideTreeBuffer = .5f;
+        private const float WorkTruckTreeBuffer = 6f;
         private const int TileSize = YanorraMap.TileSize;
 
         private readonly Dictionary<Vector2Int, Terrain> _tiles = new();
@@ -73,6 +74,7 @@ namespace KeepDriving
         private YanorraMap.Point _spawn;
         private YanorraMap.Elevation _elevation;
         private Dictionary<Vector2Int, List<YanorraMap.Point>> _sites;
+        private List<YanorraMap.Point> _workTruckSites;
         private float[,] _sourceHeights;
         private float _datumOffset, _baseY, _heightRange, _sourceHeightSize;
         private GameObject _sitesRoot;
@@ -94,6 +96,7 @@ namespace KeepDriving
         public bool HasSource => isActiveAndEnabled && _sourceData && _elevation != null;
         public bool InitialWindowReady { get; private set; }
         public float SpawnHeading => _spawn.Heading;
+        internal IReadOnlyList<YanorraMap.Point> WorkTruckSites => _workTruckSites;
         public float RecoveryHeight => _baseY - 20f;
 
         private void Awake()
@@ -112,6 +115,7 @@ namespace KeepDriving
 
                 _spawn = YanorraMap.ReadSpawn(spawnGeoJson);
                 _sites = YanorraMap.ReadSites(sitesGeoJson);
+                _workTruckSites = YanorraMap.ReadWorkTruckSites(sitesGeoJson);
                 if (_sites.Count > 0 && !satelliteDish)
                     throw new InvalidOperationException("Assign the SatelliteDish prefab's Node to the terrain streamer.");
                 _elevation = elevationControlPoints
@@ -161,8 +165,13 @@ namespace KeepDriving
             var startingGrass = PrepareGrassland(_spawn.Tile,
                 _sourceData.detailResolution > 0 ? _sourceData.detailResolution : GrassDetailResolution, CancellationToken.None);
             var startingPaint = PrepareBiomePaint(_spawn.Tile, _sourceData.alphamapResolution);
-            if (HasWater(_spawn.Tile) || startingTrees is { Length: > 0 } || startingGrass != null || startingPaint != null)
+            TreeInstance[] authoredTrees = _sourceData.treeInstances;
+            var retainedTrees = Array.FindAll(authoredTrees, tree => !NearWorkTruck(TreeMapPosition(_spawn.Tile, tree)));
+            bool clearTruckTrees = retainedTrees.Length < authoredTrees.Length;
+            if (HasWater(_spawn.Tile) || startingTrees is { Length: > 0 } || startingGrass != null || startingPaint != null || clearTruckTrees)
                 CreateStartingTerrain();
+            if (clearTruckTrees)
+                _startingTerrain.terrainData.SetTreeInstances(retainedTrees, true);
             ApplyBiomePaint(_startingTerrain.terrainData, startingPaint);
             _tiles.Add(_spawn.Tile, _startingTerrain);
             AttachRoutes(_spawn.Tile, _startingTerrain, carveStartingTerrain: true);
@@ -173,13 +182,25 @@ namespace KeepDriving
 
         public Vector3 SpawnPosition => GetSpawnPosition(Vector2.zero, 1f);
 
-        public Vector3 VehicleSpawnPosition
+        internal Vector3 PlayerSpawnWithOffset(Vector2 offset) => GetSpawnPosition(offset, 1f);
+
+        // Supplies a provisional position for an off-window marker, then the exact
+        // terrain height once the stream installs that tile.
+        internal bool GetVehicleSpawn(YanorraMap.Point point, out Vector3 position)
         {
-            get
+            Vector2Int key = point.Tile;
+            float x = (float)(point.East - key.x * TileSize);
+            float z = (float)(point.North - key.y * TileSize);
+            if (_tiles.TryGetValue(key, out var terrain))
             {
-                float heading = SpawnHeading * Mathf.Deg2Rad;
-                return GetSpawnPosition(new Vector2(Mathf.Sin(heading), Mathf.Cos(heading)) * 5f, .75f);
+                float height = terrain.terrainData.GetInterpolatedHeight(x / TileSize, z / TileSize);
+                position = terrain.GetPosition() + new Vector3(x, height + .75f, z);
+                return true;
             }
+
+            position = _origin + TileOffset(key - _originTile);
+            position += new Vector3(x, SampleGround(point.East, point.North) - _origin.y + .75f, z);
+            return false;
         }
 
         private Vector3 GetSpawnPosition(Vector2 offset, float heightOffset)
@@ -194,6 +215,8 @@ namespace KeepDriving
         private static Vector3 TileOffset(Vector2Int tile) => new Vector3(tile.x * TileSize, 0, tile.y * TileSize);
 
         public Vector2Int? GetTile(Vector3 point) => HasSource ? WorldTile(point) : null;
+
+        internal bool HasTerrainAt(Vector3 point) => _tiles.ContainsKey(WorldTile(point));
 
         internal void DrawMapRoutes(Rect map, Rect world)
         {
@@ -692,7 +715,7 @@ namespace KeepDriving
         private bool ExcludeVegetation(Vector2Int key, Vector2 point)
         {
             var spawn = new Vector2((float)_spawn.East, (float)_spawn.North);
-            if ((point - spawn).sqrMagnitude < 12f * 12f) return true;
+            if ((point - spawn).sqrMagnitude < 12f * 12f || NearWorkTruck(point)) return true;
             foreach (var route in _landRoutes)
                 if (route.Surface.ContainsRoute(key, point, includeBuffer: true)) return true;
             foreach (var water in _waterways)
@@ -701,6 +724,20 @@ namespace KeepDriving
                 if (body.ContainsPoint(point)) return true;
             return false;
         }
+
+        private bool NearWorkTruck(Vector2 point)
+        {
+            foreach (var site in _workTruckSites)
+            {
+                double east = point.x - site.East;
+                double north = point.y - site.North;
+                if (east * east + north * north <= WorkTruckTreeBuffer * WorkTruckTreeBuffer) return true;
+            }
+            return false;
+        }
+
+        private static Vector2 TreeMapPosition(Vector2Int key, TreeInstance tree) =>
+            new Vector2((key.x + tree.position.x) * TileSize, (key.y + tree.position.z) * TileSize);
 
         private void LoadGrassland()
         {

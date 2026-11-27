@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -18,9 +19,10 @@ namespace KeepDriving
         static readonly int IdleState = Animator.StringToHash("Base Layer.Idle");
         static readonly int WalkState = Animator.StringToHash("Base Layer.Walk");
         static readonly int RunState = Animator.StringToHash("Base Layer.Run");
-        public Rigidbody car;
+        [SerializeField] Rigidbody workTruckPrefab;
+        [System.NonSerialized] public Rigidbody car;
         public Camera view;
-        public AudioSource horn;
+        [System.NonSerialized] public AudioSource horn;
         [SerializeField] AudioClip tyreSkidClip;
         AudioSource tyreSkid;
         AudioClip generatedTyreSkid;
@@ -30,6 +32,16 @@ namespace KeepDriving
         float carVerticalSpeed, steering, bodyPitch, bodyRoll;
         float lastDrivingLook;
         bool carGrounded = true;
+        sealed class WorkTruck
+        {
+            public Rigidbody Body;
+            public BoxCollider Box;
+            public YanorraMap.Point? Site;
+            public bool WaitingForTerrain;
+        }
+
+        readonly List<WorkTruck> workTrucks = new();
+        WorkTruck activeTruck;
         Transform carBody;
         CarMotion carMotion;
         CarAudio carAudio;
@@ -65,36 +77,86 @@ namespace KeepDriving
                 worldMap = terrainStream.GetComponent<WorldMap>();
                 minimap = terrainStream.GetComponent<Minimap>();
             }
-            InitializeCarMotion();
-            treeTrunkMask = LayerMask.GetMask("Tree Trunks");
-            carGroundMask = ~treeTrunkMask;
-            carBox = car.GetComponent<BoxCollider>();
-            car.isKinematic = true;
-            carBody = car.transform.Find("Rectangle Body");
-            carAudio = car.GetComponent<CarAudio>();
-            tyreSkid = car.gameObject.AddComponent<AudioSource>();
-            if (carAudio && carAudio.SfxGroup)
-            {
-                horn.outputAudioMixerGroup = carAudio.SfxGroup;
-                tyreSkid.outputAudioMixerGroup = carAudio.SfxGroup;
-            }
-            tyreSkid.playOnAwake = false;
-            tyreSkid.loop = true;
-            if (!tyreSkidClip) generatedTyreSkid = CreateTyreSkidClip();
-            tyreSkid.clip = tyreSkidClip ? tyreSkidClip : generatedTyreSkid;
-            tyreSkid.volume = 0f;
-            car.interpolation = RigidbodyInterpolation.Interpolate;
             if (terrainStream && terrainStream.HasSource)
             {
-                car.position = terrainStream.VehicleSpawnPosition;
+                if (terrainStream.WorkTruckSites.Count > 0 && !workTruckPrefab)
+                    Debug.LogError("Assign the WorkTruck prefab on the Prototype Controller.", this);
+                if (workTruckPrefab)
+                {
+                    foreach (var site in terrainStream.WorkTruckSites)
+                    {
+                        bool ready = terrainStream.GetVehicleSpawn(site, out var position);
+                        var truck = SpawnWorkTruck(position, Quaternion.Euler(0f, site.Heading, 0f));
+                        truck.Site = site;
+                        truck.WaitingForTerrain = !ready;
+                    }
+                }
                 yaw = terrainStream.SpawnHeading;
-                car.rotation = Quaternion.Euler(0, yaw, 0);
-                player.transform.rotation = car.rotation;
-                PlacePlayer(terrainStream.SpawnPosition);
+                player.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                PlacePlayerAtSpawn();
             }
             InitializeWalkingCharacter();
             LockCursor(); UpdateVisibility();
         }
+        WorkTruck SpawnWorkTruck(Vector3 position, Quaternion rotation)
+        {
+            var body = Instantiate(workTruckPrefab, position, rotation);
+            if (body.TryGetComponent(out MapMarker marker))
+            {
+                if (worldMap) worldMap.TrackMarker(marker);
+                if (minimap) minimap.TrackMarker(marker);
+            }
+            var truck = new WorkTruck { Body = body, Box = body.GetComponent<BoxCollider>() };
+            workTrucks.Add(truck);
+            return truck;
+        }
+
+        void SelectWorkTruck(WorkTruck truck)
+        {
+            if (activeTruck == truck) return;
+            if (carAudio) carAudio.enabled = false;
+            if (tyreSkid)
+            {
+                tyreSkid.Stop();
+                Destroy(tyreSkid);
+            }
+            if (seatedCharacter) Destroy(seatedCharacter);
+            if (seatedDriver) Destroy(seatedDriver.gameObject);
+            if (seatedTorso) Destroy(seatedTorso.gameObject);
+            seatedCharacter = null;
+            seatedDriver = null;
+            seatedTorso = null;
+            tyreSlip = 0f;
+            bodyPitch = bodyRoll = 0f;
+            carVelocity = Vector3.zero;
+            carVerticalSpeed = steering = 0f;
+            carGrounded = true;
+            activeTruck = truck;
+            car = truck.Body;
+
+            InitializeCarMotion();
+            treeTrunkMask = LayerMask.GetMask("Tree Trunks");
+            carGroundMask = ~treeTrunkMask;
+            carBox = truck.Box;
+            car.isKinematic = true;
+            carBody = car.transform.Find("Rectangle Body");
+            horn = car.GetComponent<AudioSource>();
+            carAudio = car.GetComponent<CarAudio>();
+            if (carAudio) carAudio.enabled = true;
+            tyreSkid = car.gameObject.AddComponent<AudioSource>();
+            if (carAudio && carAudio.SfxGroup)
+            {
+                if (horn) horn.outputAudioMixerGroup = carAudio.SfxGroup;
+                tyreSkid.outputAudioMixerGroup = carAudio.SfxGroup;
+            }
+            tyreSkid.playOnAwake = false;
+            tyreSkid.loop = true;
+            if (!tyreSkidClip && !generatedTyreSkid) generatedTyreSkid = CreateTyreSkidClip();
+            tyreSkid.clip = tyreSkidClip ? tyreSkidClip : generatedTyreSkid;
+            tyreSkid.volume = 0f;
+            car.interpolation = RigidbodyInterpolation.Interpolate;
+        }
+
         void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
         void OnApplicationFocus(bool focus)
         {
@@ -112,6 +174,16 @@ namespace KeepDriving
         void Update()
         {
             if (terrainStream) terrainStream.Pump(driving ? car.position : player.transform.position);
+            bool settledTruck = false;
+            foreach (var truck in workTrucks)
+            {
+                if (!truck.Body || !truck.WaitingForTerrain || !truck.Site.HasValue) continue;
+                if (!terrainStream.GetVehicleSpawn(truck.Site.Value, out var position)) continue;
+                truck.Body.position = position;
+                truck.WaitingForTerrain = false;
+                settledTruck = true;
+            }
+            if (settledTruck) Physics.SyncTransforms();
             if (WaitingForTerrain) return;
             var keys = Keyboard.current;
             int zoom = (keys?.equalsKey.wasPressedThisFrame == true ? 1 : 0)
@@ -147,13 +219,13 @@ namespace KeepDriving
                 fieldReceiver.Open();
                 lastEscape = -10f;
                 quitHintUntil = 0;
-                if (horn.isPlaying) horn.Stop();
+                if (horn && horn.isPlaying) horn.Stop();
                 UnlockCursor();
                 return;
             }
             if (keys?.mKey.wasPressedThisFrame == true && worldMap && worldMap.TryOpen())
             {
-                if (horn.isPlaying) horn.Stop();
+                if (horn && horn.isPlaying) horn.Stop();
                 UnlockCursor();
                 return;
             }
@@ -218,12 +290,12 @@ namespace KeepDriving
                 if (terrainStream && terrainStream.HasSource && player.transform.position.y < terrainStream.RecoveryHeight)
                 {
                     terrainStream.RestoreSourceTile();
-                    PlacePlayer(terrainStream.SpawnPosition);
+                    PlacePlayerAtSpawn();
                     verticalSpeed = 0;
                 }
             }
-            if (driving && mouse?.rightButton.isPressed == true) { if (!horn.isPlaying) horn.Play(); }
-            else if (horn.isPlaying) horn.Stop();
+            if (driving && horn && mouse?.rightButton.isPressed == true) { if (!horn.isPlaying) horn.Play(); }
+            else if (horn && horn.isPlaying) horn.Stop();
         }
 
         void OpenTerminal(Terminal terminal)
@@ -241,6 +313,40 @@ namespace KeepDriving
             terminalScreen.Close();
             activeTerminal = null;
             LockCursor();
+        }
+
+        void PlacePlayerAtSpawn()
+        {
+            Vector3 spawn = terrainStream.SpawnPosition;
+            if (OverlapsTruckAtSpawn(spawn))
+            {
+                for (int radius = 4; radius <= 24; radius += 4)
+                {
+                    for (int direction = 0; direction < 8; direction++)
+                    {
+                        float angle = direction * Mathf.PI / 4f;
+                        Vector2 offset = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
+                        Vector3 candidate = terrainStream.PlayerSpawnWithOffset(offset);
+                        if (OverlapsTruckAtSpawn(candidate)) continue;
+                        PlacePlayer(candidate);
+                        return;
+                    }
+                }
+            }
+            PlacePlayer(spawn);
+        }
+
+        bool OverlapsTruckAtSpawn(Vector3 position)
+        {
+            foreach (var truck in workTrucks)
+            {
+                var box = truck.Box;
+                if (!box || truck.WaitingForTerrain) continue;
+                Vector3 local = box.transform.InverseTransformPoint(position) - box.center;
+                if (Mathf.Abs(local.x) < box.size.x * .5f + player.radius
+                    && Mathf.Abs(local.z) < box.size.z * .5f + player.radius) return true;
+            }
+            return false;
         }
 
         void PlacePlayer(Vector3 position)
@@ -270,6 +376,8 @@ namespace KeepDriving
             Vector3 focus = driving ? car.position : player.transform.position;
             if (terrainStream && terrainStream.ShiftOriginIfNeeded(focus) && skidMarks != null)
                 foreach (var mark in skidMarks) mark.Clear();
+            if (!car || activeTruck.WaitingForTerrain || (!driving && terrainStream && terrainStream.HasSource
+                && !terrainStream.HasTerrainAt(car.position))) return;
 
             float dt = Time.fixedDeltaTime;
             var keys = Keyboard.current;
@@ -319,11 +427,11 @@ namespace KeepDriving
                 carGrounded = false;
             }
 
-            if (terrainStream && terrainStream.HasSource && next.y < terrainStream.RecoveryHeight)
+            if (terrainStream && terrainStream.HasSource && activeTruck.Site.HasValue && next.y < terrainStream.RecoveryHeight)
             {
-                terrainStream.RestoreSourceTile();
-                next = terrainStream.VehicleSpawnPosition;
-                rotation = Quaternion.Euler(0f, terrainStream.SpawnHeading, 0f);
+                var site = activeTruck.Site.Value;
+                activeTruck.WaitingForTerrain = !terrainStream.GetVehicleSpawn(site, out next);
+                rotation = Quaternion.Euler(0f, site.Heading, 0f);
                 carVelocity = Vector3.zero;
                 carVerticalSpeed = 0f;
                 carGrounded = true;
@@ -429,7 +537,8 @@ namespace KeepDriving
             for (int i = 0; i < count; i++)
             {
                 var hit = groundHits[i];
-                if (hit.rigidbody == car || hit.collider.transform.IsChildOf(player.transform) || hit.distance >= nearest) continue;
+                if (hit.distance >= nearest || hit.collider.transform.IsChildOf(player.transform)
+                    || (hit.rigidbody && hit.rigidbody.TryGetComponent<CarMotion>(out _))) continue;
                 nearest = hit.distance;
                 ground = hit;
             }
@@ -490,11 +599,30 @@ namespace KeepDriving
             UpdateSkidMarks();
         }
 
-        bool NearCar() => Vector3.Distance(player.transform.position, car.GetComponent<Collider>().ClosestPoint(player.transform.position)) < 2f;
+        bool NearCar() => FindNearbyTruck() != null;
+
+        WorkTruck FindNearbyTruck()
+        {
+            WorkTruck nearest = null;
+            float nearestDistanceSquared = 4f;
+            Vector3 position = player.transform.position;
+            foreach (var truck in workTrucks)
+            {
+                if (!truck.Box || truck.WaitingForTerrain) continue;
+                float distanceSquared = (truck.Box.ClosestPoint(position) - position).sqrMagnitude;
+                if (distanceSquared >= nearestDistanceSquared) continue;
+                nearest = truck;
+                nearestDistanceSquared = distanceSquared;
+            }
+            return nearest;
+        }
 
         bool _bOriginalThirdPersonState = true;
         void Enter()
         {
+            var truck = FindNearbyTruck();
+            if (truck == null) return;
+            SelectWorkTruck(truck);
             driving = true;
             engineLoad = 0f;
             boosting = false;
@@ -537,7 +665,7 @@ namespace KeepDriving
                 carVelocity = Vector3.zero;
                 skidding = false;
                 if (!car.isKinematic) car.linearVelocity = Vector3.zero;
-                horn.Stop();
+                if (horn) horn.Stop();
                 thirdPerson = _bOriginalThirdPersonState;
                 UpdateVisibility();
                 return;
@@ -731,7 +859,8 @@ namespace KeepDriving
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
             if (walkingAnimator) Destroy(walkingAnimator.gameObject);
-            if (seatedCharacter) Destroy(seatedCharacter);
+            foreach (var truck in workTrucks)
+                if (truck.Body) Destroy(truck.Body.gameObject);
             if (skidMaterial) Destroy(skidMaterial);
             if (tyreSkid) Destroy(tyreSkid);
             if (generatedTyreSkid) Destroy(generatedTyreSkid);

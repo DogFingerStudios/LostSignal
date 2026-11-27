@@ -16,7 +16,7 @@ namespace KeepDriving.Editor
             {
                 Physics.simulationMode = SimulationMode.Script;
                 game.player.enabled = false;
-                game.car.position = new Vector3(0, .75f, 0);
+                PrototypeValidation.SpawnTestTruck(game);
                 game.car.rotation = Quaternion.identity;
                 Physics.SyncTransforms();
                 var speed = typeof(PrototypeController).GetField("carVelocity", BindingFlags.NonPublic | BindingFlags.Instance);

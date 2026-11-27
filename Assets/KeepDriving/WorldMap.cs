@@ -18,6 +18,8 @@ namespace KeepDriving
 
         [SerializeField] private List<MapMarker> trackedMarkers = new();
 
+        internal void TrackMarker(MapMarker marker) => trackedMarkers.Add(marker);
+
         private TerrainStream _stream;
         private const int Resolution = 512;
         private const float MinSpan = 10f;

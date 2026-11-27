@@ -49,6 +49,18 @@ With project macros enabled, saving edits to Spawn Point, Sites, or Site
 clearings refreshes the corresponding spawn_point.geojson, sites.geojson,
 or site_clearings.geojson beside the project.
 
+## Placing the work truck
+
+Under **Sites → Sites**, add a point with **site_type** set to **WorkTruck**.
+Place it where the center of the truck should be and set **heading_deg** for
+the direction it should face. Unity spawns one drivable truck per valid
+WorkTruck point. Unity keeps terrain trees and generated vegetation
+at least 6 m from every WorkTruck marker, including across tile boundaries.
+
+Save the site and verify the updated sites.geojson is in Assets/MapData.
+The project macro copies the export there when enabled. Maps without a
+WorkTruck marker have no drivable truck.
+
 ## Drawing water
 
 Use **Rivers and streams** for waterway centerlines. Choose river, stream,

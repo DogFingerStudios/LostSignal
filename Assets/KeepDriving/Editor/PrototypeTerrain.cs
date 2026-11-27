@@ -103,9 +103,6 @@ namespace KeepDriving.Editor
             var terrainStream = Configure(ground);
             var game = Object.FindFirstObjectByType<PrototypeController>();
             game.terrainStream = terrainStream;
-            game.car.isKinematic = true;
-            game.car.interpolation = RigidbodyInterpolation.Interpolate;
-            game.car.constraints = RigidbodyConstraints.None;
             EditorSceneManager.SaveScene(game.gameObject.scene);
             AssetDatabase.SaveAssets();
             PrototypeValidation.Validate();
