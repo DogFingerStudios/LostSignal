@@ -9,6 +9,13 @@ namespace KeepDriving
 
         public CharacterController player;
         public Renderer playerVisual;
+        [SerializeField] GameObject walkingCharacterPrefab;
+        [SerializeField] RuntimeAnimatorController walkingAnimatorController;
+        Animator walkingAnimator;
+        int walkingState;
+        static readonly int IdleState = Animator.StringToHash("Base Layer.Idle");
+        static readonly int WalkState = Animator.StringToHash("Base Layer.Walk");
+        static readonly int RunState = Animator.StringToHash("Base Layer.Run");
         public Rigidbody car;
         public Camera view;
         public AudioSource horn;
@@ -81,6 +88,7 @@ namespace KeepDriving
                 player.transform.rotation = car.rotation;
                 PlacePlayer(terrainStream.SpawnPosition);
             }
+            InitializeWalkingCharacter();
             LockCursor(); UpdateVisibility();
         }
         void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
@@ -195,7 +203,10 @@ namespace KeepDriving
                 if (player.isGrounded && verticalSpeed < 0) verticalSpeed = -2;
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
-                player.Move((movement * (ShiftHeld ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
+                bool running = ShiftHeld;
+                Vector3 beforeMove = player.transform.position;
+                player.Move((movement * (running ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
+                UpdateWalkingAnimation(player.transform.position - beforeMove, running);
                 if (terrainStream && terrainStream.HasSource && player.transform.position.y < terrainStream.RecoveryHeight)
                 {
                     terrainStream.RestoreSourceTile();
@@ -519,9 +530,52 @@ namespace KeepDriving
             }
         }
 
+        void InitializeWalkingCharacter()
+        {
+            if (!walkingCharacterPrefab || !walkingAnimatorController) return;
+
+            GameObject visual = Instantiate(walkingCharacterPrefab, player.transform, false);
+            visual.transform.localPosition = player.center - Vector3.up * (player.height * .5f);
+            visual.transform.localRotation = Quaternion.identity;
+            walkingAnimator = visual.GetComponent<Animator>();
+            if (!walkingAnimator)
+            {
+                Debug.LogWarning("The walking prefab needs an Animator on its root.", visual);
+                Destroy(visual);
+                return;
+            }
+
+            foreach (var collider in visual.GetComponentsInChildren<Collider>(true))
+                collider.enabled = false;
+            walkingAnimator.runtimeAnimatorController = walkingAnimatorController;
+            walkingAnimator.applyRootMotion = false;
+            thirdPerson = true;
+        }
+
+        void UpdateWalkingAnimation(Vector3 displacement, bool running)
+        {
+            if (!walkingAnimator || !walkingAnimator.isActiveAndEnabled) return;
+            displacement.y = 0f;
+            float movementThreshold = .15f * Time.deltaTime;
+            bool moving = displacement.sqrMagnitude > Mathf.Max(.000001f, movementThreshold * movementThreshold);
+            if (moving)
+                walkingAnimator.transform.rotation = Quaternion.LookRotation(displacement);
+
+            int state = moving ? (running ? RunState : WalkState) : IdleState;
+            if (walkingState == state) return;
+            walkingAnimator.CrossFadeInFixedTime(state, .12f, 0);
+            walkingState = state;
+        }
+
         void UpdateVisibility()
         {
-            playerVisual.enabled = !driving && thirdPerson;
+            bool showWalkingVisual = !driving && thirdPerson;
+            playerVisual.enabled = showWalkingVisual && !walkingAnimator;
+            if (walkingAnimator && walkingAnimator.gameObject.activeSelf != showWalkingVisual)
+            {
+                walkingAnimator.gameObject.SetActive(showWalkingVisual);
+                walkingState = 0;
+            }
             if (seatedDriver) seatedDriver.enabled = driving && thirdPerson;
             if (seatedTorso) seatedTorso.enabled = driving && !thirdPerson;
         }
@@ -613,6 +667,7 @@ namespace KeepDriving
         {
             fieldReceiver?.Dispose();
             terminalScreen?.Dispose();
+            if (walkingAnimator) Destroy(walkingAnimator.gameObject);
             if (skidMaterial) Destroy(skidMaterial);
             if (tyreSkid) Destroy(tyreSkid);
             if (generatedTyreSkid) Destroy(generatedTyreSkid);

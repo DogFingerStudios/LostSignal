@@ -766,7 +766,7 @@ MonoBehaviour:
   grasslandGrassTextures:
   - {fileID: 2800000, guid: 18023b893dedc2f41b2735582b22036c, type: 3}
   - {fileID: 2800000, guid: e3f873c56651ccd4a83ab80769dd19f3, type: 3}
-  streamingGridSize: 3
+  streamingGridSize: 1
   grassAndWoodlandGround: {fileID: 2800000, guid: ffbc4ff073065254585f69e966389160, type: 3}
   scrubAndBarrenGround: {fileID: 2800000, guid: 5edd0aaa57578b84da829c036eecf914, type: 3}
 --- !u!114 &919439686
@@ -836,6 +836,8 @@ MonoBehaviour:
   terrainStream: {fileID: 919439685}
   player: {fileID: 2055955582}
   playerVisual: {fileID: 2055955581}
+  walkingCharacterPrefab: {fileID: 5865036580105156138, guid: c7bcbed7f2759b3468c9deb0b2e59857, type: 3}
+  walkingAnimatorController: {fileID: 9100000, guid: 273a8c2d9e0c44c58a885abb42b2ef79, type: 2}
   car: {fileID: 245214888}
   view: {fileID: 63276286}
   horn: {fileID: 245214887}
