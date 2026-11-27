@@ -31,6 +31,9 @@ namespace KeepDriving
         readonly Collider[] exitHits = new Collider[16];
         readonly RaycastHit[] groundHits = new RaycastHit[32];
         int carGroundMask = ~0;
+        int treeTrunkMask;
+        BoxCollider carBox;
+        const float TreeContactGap = .02f;
         readonly RaycastHit[] cameraHits = new RaycastHit[32];
         Vector3 carVelocity;
         Renderer seatedDriver, seatedTorso;
@@ -52,7 +55,9 @@ namespace KeepDriving
                 minimap = terrainStream.GetComponent<Minimap>();
             }
             InitializeCarMotion();
-            carGroundMask = ~LayerMask.GetMask("Tree Trunks");
+            treeTrunkMask = LayerMask.GetMask("Tree Trunks");
+            carGroundMask = ~treeTrunkMask;
+            carBox = car.GetComponent<BoxCollider>();
             car.isKinematic = true;
             carBody = car.transform.Find("Rectangle Body");
             carAudio = car.GetComponent<CarAudio>();
@@ -304,6 +309,10 @@ namespace KeepDriving
                 carVerticalSpeed = 0f;
                 carGrounded = true;
             }
+            else
+            {
+                ResolveTreeCollision(position, ref next, ref rotation);
+            }
 
             car.MoveRotation(rotation);
             car.MovePosition(next);
@@ -319,6 +328,43 @@ namespace KeepDriving
             bodyPitch = Mathf.Lerp(bodyPitch, pitchTarget, 1f - Mathf.Exp(-7f * dt));
             bodyRoll = Mathf.Lerp(bodyRoll, rollTarget, 1f - Mathf.Exp(-7f * dt));
             if (carBody) carBody.localRotation = Quaternion.Euler(bodyPitch, 0f, bodyRoll);
+        }
+
+        void ResolveTreeCollision(Vector3 position, ref Vector3 next, ref Quaternion rotation)
+        {
+            if (!carBox || !carBox.enabled || treeTrunkMask == 0) return;
+
+            Vector3 scale = car.transform.lossyScale;
+            Vector3 centerOffset = Vector3.Scale(carBox.center, scale);
+            Vector3 halfSize = Vector3.Scale(carBox.size * .5f,
+                new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
+            Quaternion startRotation = car.rotation;
+            Vector3 displacement = next - position;
+            float distance = displacement.magnitude;
+
+            // The kinematic body needs a sweep because MovePosition follows the requested pose.
+            if (distance > .0001f)
+            {
+                Vector3 direction = displacement / distance;
+                if (Physics.BoxCast(position + startRotation * centerOffset, halfSize, direction,
+                    out var hit, startRotation, distance + TreeContactGap, treeTrunkMask, QueryTriggerInteraction.Ignore))
+                {
+                    next = position + direction * Mathf.Clamp(hit.distance - TreeContactGap, 0f, distance);
+                    Vector3 horizontalNormal = Vector3.ProjectOnPlane(hit.normal, Vector3.up).normalized;
+                    float inwardSpeed = Vector3.Dot(carVelocity, horizontalNormal);
+                    if (inwardSpeed < 0f) carVelocity -= horizontalNormal * inwardSpeed;
+                    if (carGrounded)
+                        carVerticalSpeed = (next.y - position.y) / Time.fixedDeltaTime;
+                    else if (carVerticalSpeed * hit.normal.y < 0f)
+                        carVerticalSpeed *= 1f - hit.normal.y * hit.normal.y;
+                }
+            }
+
+            // A front or rear corner can reach a trunk as the truck turns at low speed.
+            if (Quaternion.Angle(startRotation, rotation) > .01f &&
+                Physics.CheckBox(next + rotation * centerOffset, halfSize, rotation,
+                    treeTrunkMask, QueryTriggerInteraction.Ignore))
+                rotation = startRotation;
         }
 
         static float Axis(bool positive, bool negative) => (positive ? 1f : 0f) - (negative ? 1f : 0f);
@@ -343,7 +389,9 @@ namespace KeepDriving
             for (int x = -1; x <= 1; x += 2)
             for (int z = -1; z <= 1; z += 2)
             {
-                Vector3 corner = rotation * new Vector3(x * .9f, -.7f, z * 2.2f);
+                // Approximate the ZIL's axle locations in car-root meters.
+                float axleZ = z < 0 ? -1.58f : 2.22f;
+                Vector3 corner = rotation * new Vector3(x * .9f, -.7f, axleZ);
                 if (GroundAt(next + corner, out var support)) height = Mathf.Max(height, support.point.y - corner.y + .05f);
             }
             return true;
@@ -361,7 +409,10 @@ namespace KeepDriving
                 nearest = hit.distance;
                 ground = hit;
             }
-            return nearest < float.PositiveInfinity;
+            if (nearest == float.PositiveInfinity) return false;
+            if (terrainStream && ground.collider is TerrainCollider)
+                ground.point += Vector3.up * terrainStream.LandRouteHeightOffset(ground.point);
+            return true;
         }
 
         void LateUpdate()

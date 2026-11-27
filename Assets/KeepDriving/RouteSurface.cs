@@ -44,6 +44,8 @@ namespace KeepDriving
             }
         }
 
+        internal float HeightOffset => _heightOffset;
+
         public RouteSurface(TextAsset geoJson, string field, string type, float defaultWidth, float spacing, float heightOffset, float channelDepth = 0f, float treeBuffer = 0f)
         {
             _spacing = spacing;

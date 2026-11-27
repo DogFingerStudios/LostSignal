@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: b77b2a7a0540f1a46bded680efc7e603
+guid: caffda144e3c7d34d94adc25d7428e3f
 PrefabImporter:
   externalObjects: {}
   userData: 
@@ -10,5 +10,5 @@ AssetOrigin:
   productId: 208991
   packageName: ZIL 130 Military truck
   packageVersion: 1.0
-  assetPath: Assets/ZIL130_MilitaryTruck/Prefabs/ZIL130_Cover.prefab
+  assetPath: Assets/ZIL130_MilitaryTruck/Prefabs/ZIL130_NoCover.prefab
   uploadId: 469672

@@ -218,14 +218,18 @@ namespace KeepDriving
             tiles.UnionWith(_tiles.Keys);
         }
 
-        internal bool IsOnLandRoute(Vector3 position)
+        internal bool IsOnLandRoute(Vector3 position) => LandRouteHeightOffset(position) > 0f;
+
+        internal float LandRouteHeightOffset(Vector3 position)
         {
-            if (!HasSource) return false;
+            if (!HasSource) return 0f;
             Vector2Int key = WorldTile(position);
             Vector2 point = ToMapPosition(position);
+            float heightOffset = 0f;
             foreach (var route in _landRoutes)
-                if (route.Surface.ContainsRoute(key, point)) return true;
-            return false;
+                if (route.Surface.HeightOffset > heightOffset && route.Surface.ContainsRoute(key, point))
+                    heightOffset = route.Surface.HeightOffset;
+            return heightOffset;
         }
 
         internal Vector2 ToMapPosition(Vector3 position) => new Vector2(
