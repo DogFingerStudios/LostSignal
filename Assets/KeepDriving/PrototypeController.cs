@@ -197,9 +197,13 @@ namespace KeepDriving
             }
             if (!driving)
             {
-                player.transform.rotation = Quaternion.Euler(0, yaw, 0);
+                Quaternion viewHeading = Quaternion.Euler(0f, yaw, 0f);
                 Vector2 input = ReadMovement();
-                Vector3 movement = player.transform.right * input.x + player.transform.forward * input.y;
+                Vector3 movement = viewHeading * new Vector3(input.x, 0f, input.y);
+                if (!thirdPerson)
+                    player.transform.rotation = viewHeading;
+                else if (movement.sqrMagnitude > 0f)
+                    player.transform.rotation = Quaternion.LookRotation(movement);
                 if (player.isGrounded && verticalSpeed < 0) verticalSpeed = -2;
                 if (player.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = Mathf.Sqrt(2f * 1.25f * 20f);
                 verticalSpeed -= 20f * Time.deltaTime;
@@ -558,8 +562,6 @@ namespace KeepDriving
             displacement.y = 0f;
             float movementThreshold = .15f * Time.deltaTime;
             bool moving = displacement.sqrMagnitude > Mathf.Max(.000001f, movementThreshold * movementThreshold);
-            if (moving)
-                walkingAnimator.transform.rotation = Quaternion.LookRotation(displacement);
 
             int state = moving ? (running ? RunState : WalkState) : IdleState;
             if (walkingState == state) return;
@@ -686,7 +688,7 @@ namespace KeepDriving
                 if (Event.current.type == EventType.Repaint)
                 {
                     worldMap.Draw(driving ? car.position : player.transform.position,
-                        driving ? car.rotation.eulerAngles.y : yaw);
+                        driving ? car.rotation.eulerAngles.y : player.transform.eulerAngles.y);
                 }
 
                 return;
@@ -710,7 +712,7 @@ namespace KeepDriving
 
             if (Event.current.type == EventType.Repaint)
             {
-                if (minimap) minimap.Draw(position, driving ? car.rotation.eulerAngles.y : yaw);
+                if (minimap) minimap.Draw(position, driving ? car.rotation.eulerAngles.y : player.transform.eulerAngles.y);
                 if (!driving)
                 {
                     const float radius = 2.5f;
