@@ -9,6 +9,7 @@ namespace KeepDriving
         public TerrainStream terrainStream;
 
         public CharacterController player;
+        private PlayerFootsteps footsteps;
         public Renderer playerVisual;
         [SerializeField] GameObject walkingCharacterPrefab;
         [SerializeField] RuntimeAnimatorController walkingAnimatorController;
@@ -72,6 +73,7 @@ namespace KeepDriving
 
         void Start()
         {
+            footsteps = player.GetComponent<PlayerFootsteps>();
             if (terrainStream)
             {
                 worldMap = terrainStream.GetComponent<WorldMap>();
@@ -286,7 +288,9 @@ namespace KeepDriving
                 bool running = ShiftHeld;
                 Vector3 beforeMove = player.transform.position;
                 player.Move((movement * (running ? WalkSpeed * 1.7f : WalkSpeed) + Vector3.up * verticalSpeed) * Time.deltaTime);
-                UpdateWalkingAnimation(player.transform.position - beforeMove, running);
+                Vector3 displacement = player.transform.position - beforeMove;
+                UpdateWalkingAnimation(displacement, running);
+                if (footsteps) footsteps.Advance(displacement, input.sqrMagnitude > 0f, player.isGrounded, running, terrainStream);
                 if (terrainStream && terrainStream.HasSource && player.transform.position.y < terrainStream.RecoveryHeight)
                 {
                     terrainStream.RestoreSourceTile();
@@ -627,6 +631,7 @@ namespace KeepDriving
             engineLoad = 0f;
             boosting = false;
             player.enabled = false;
+            if (footsteps) footsteps.Stop();
             EnsureDriver();
             yaw = car.rotation.eulerAngles.y;
             pitch = 12f;

@@ -395,7 +395,7 @@ MonoBehaviour:
   grasslandGrassTextures:
   - {fileID: 2800000, guid: 18023b893dedc2f41b2735582b22036c, type: 3}
   - {fileID: 2800000, guid: e3f873c56651ccd4a83ab80769dd19f3, type: 3}
-  streamingGridSize: 5
+  streamingGridSize: 1
   grassAndWoodlandGround: {fileID: 2800000, guid: ffbc4ff073065254585f69e966389160, type: 3}
   scrubAndBarrenGround: {fileID: 2800000, guid: 5edd0aaa57578b84da829c036eecf914, type: 3}
 --- !u!114 &919439686
@@ -750,6 +750,7 @@ GameObject:
   - component: {fileID: 2055955583}
   - component: {fileID: 2055955581}
   - component: {fileID: 2055955582}
+  - component: {fileID: 2055955585}
   m_Layer: 0
   m_Name: Player Capsule (1.8m)
   m_TagString: Untagged
@@ -854,6 +855,39 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2055955585
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2055955580}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f0aa4a3ba427421c9aa0fec1425e6c03, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.PlayerFootsteps
+  sfxGroup: {fileID: -1283452920924675401, guid: 0acfd3505c6483340bdc2dd19bfdfa38, type: 2}
+  dirtWalk:
+  - {fileID: 8300000, guid: 9ea11a2d13d536e4e8441a0f5895995c, type: 3}
+  - {fileID: 8300000, guid: 203ac8b6f07070e4f93f1c1a6fff06c3, type: 3}
+  - {fileID: 8300000, guid: ac6649006dbee9e4685752e124111da7, type: 3}
+  - {fileID: 8300000, guid: f42914d98b070f741b2feee96a2988ee, type: 3}
+  dirtRun:
+  - {fileID: 8300000, guid: 9e68ea1ebd76aa44c8cfa5beb9850830, type: 3}
+  - {fileID: 8300000, guid: 1deb201b8bf8f89479323a74e421150b, type: 3}
+  - {fileID: 8300000, guid: 7c518e8469a403b4c981664ecb28a79a, type: 3}
+  - {fileID: 8300000, guid: 1f2844efbf7abf647ba3d75d510f823a, type: 3}
+  gravelWalk:
+  - {fileID: 8300000, guid: 5461cae585b64f64089805f0d313bc84, type: 3}
+  - {fileID: 8300000, guid: 2b3fc7e56f2686b48b9445e48c7db2c9, type: 3}
+  - {fileID: 8300000, guid: 87d51f07abec0584d805bbe3708a7c71, type: 3}
+  - {fileID: 8300000, guid: 9f96c8d3fef6ab440bdc9bd4ad3d08fe, type: 3}
+  gravelRun:
+  - {fileID: 8300000, guid: 44737e645aa918043b3d8cab5d1511bc, type: 3}
+  - {fileID: 8300000, guid: 302595b93370c52408825d7fb07d09be, type: 3}
+  - {fileID: 8300000, guid: 2bb076cd89fe2a148a76da2a45c910e4, type: 3}
+  - {fileID: 8300000, guid: 0b8aed54efbbfa946af2f31d3d92f9cd, type: 3}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
