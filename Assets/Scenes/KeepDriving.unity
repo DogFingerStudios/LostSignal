@@ -395,7 +395,7 @@ MonoBehaviour:
   grasslandGrassTextures:
   - {fileID: 2800000, guid: 18023b893dedc2f41b2735582b22036c, type: 3}
   - {fileID: 2800000, guid: e3f873c56651ccd4a83ab80769dd19f3, type: 3}
-  streamingGridSize: 1
+  streamingGridSize: 5
   grassAndWoodlandGround: {fileID: 2800000, guid: ffbc4ff073065254585f69e966389160, type: 3}
   scrubAndBarrenGround: {fileID: 2800000, guid: 5edd0aaa57578b84da829c036eecf914, type: 3}
 --- !u!114 &919439686

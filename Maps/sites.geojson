@@ -15,6 +15,6 @@
 { "type": "Feature", "properties": { "id": "{19c39843-ad3b-4dfd-9728-6d712f356b20}", "name": "HC-205008", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 161772.32612814, 169195.05533217 ] } },
 { "type": "Feature", "properties": { "id": "{32cb1c85-3a93-44c0-b8f1-d3eb69adf899}", "name": "HC-205007", "site_type": "Horizon Chain node", "heading_deg": null, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 119293.76114619, 121575.47049463 ] } },
 { "type": "Feature", "properties": { "id": "{b1684b97-4f09-47f4-8bdf-87673b4483c1}", "name": "Truck99", "site_type": "WorkTruck", "heading_deg": 90.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74368.57009539, 101215.90755134 ] } },
-{ "type": "Feature", "properties": { "id": "{eebdaca6-7483-4d9c-9ec3-0098ffad8562}", "name": "Truck88", "site_type": "WorkTruck", "heading_deg": 45.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74401.76282269, 101188.80355132 ] } }
+{ "type": "Feature", "properties": { "id": "{eebdaca6-7483-4d9c-9ec3-0098ffad8562}", "name": "Truck88", "site_type": "WorkTruck", "heading_deg": 45.0, "notes": null }, "geometry": { "type": "Point", "coordinates": [ 74723.71191383, 101194.77009678 ] } }
 ]
 }
