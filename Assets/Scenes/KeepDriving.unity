@@ -395,7 +395,7 @@ MonoBehaviour:
   grasslandGrassTextures:
   - {fileID: 2800000, guid: 18023b893dedc2f41b2735582b22036c, type: 3}
   - {fileID: 2800000, guid: e3f873c56651ccd4a83ab80769dd19f3, type: 3}
-  streamingGridSize: 1
+  streamingGridSize: 3
   grassAndWoodlandGround: {fileID: 2800000, guid: ffbc4ff073065254585f69e966389160, type: 3}
   scrubAndBarrenGround: {fileID: 2800000, guid: 5edd0aaa57578b84da829c036eecf914, type: 3}
 --- !u!114 &919439686
@@ -467,7 +467,7 @@ MonoBehaviour:
   walkingAnimatorController: {fileID: 9100000, guid: 273a8c2d9e0c44c58a885abb42b2ef79, type: 2}
   seatedDriverPose: {fileID: 7400000, guid: 7ecac0e6366f77f4f9c87a1afd553939, type: 2}
   driverHeadPosition: {x: -0.48, y: 1.14, z: 1.24}
-  workTruckPrefab: {fileID: 245214888, guid: 907799bd59f440c4a6ac746ff25e8b15, type: 3}
+  workTruckPrefab: {fileID: 245214888, guid: caffda144e3c7d34d94adc25d7428e3f, type: 3}
   view: {fileID: 63276286}
   tyreSkidClip: {fileID: 0}
 --- !u!4 &988729360
@@ -865,7 +865,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f0aa4a3ba427421c9aa0fec1425e6c03, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KeepDriving.PlayerFootsteps
   sfxGroup: {fileID: -1283452920924675401, guid: 0acfd3505c6483340bdc2dd19bfdfa38, type: 2}
   dirtWalk:

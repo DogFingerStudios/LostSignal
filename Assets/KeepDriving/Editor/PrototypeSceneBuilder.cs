@@ -43,7 +43,7 @@ namespace KeepDriving.Editor
             game.player = controller; game.playerVisual = player.GetComponent<Renderer>(); game.view = camera;
             var settings = new SerializedObject(game);
             settings.FindProperty("workTruckPrefab").objectReferenceValue =
-                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/KeepDriving/WorkTruck.prefab").GetComponent<Rigidbody>();
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/ZIL130_MilitaryTruck/Prefabs/ZIL130_Cover.prefab").GetComponent<Rigidbody>();
             settings.ApplyModifiedPropertiesWithoutUndo();
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
