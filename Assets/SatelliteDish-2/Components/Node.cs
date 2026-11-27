@@ -29,6 +29,16 @@ public class Node : MonoBehaviour
     private float _timer;
     private const float Interval = 0.5f;
 
+    void Awake()
+    {
+        NodeManager.Instance.RegisterNode(this);
+    }
+
+    void OnDestroy()
+    {
+        NodeManager.Instance.UnregisterNode(this);
+    }
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {

@@ -7,29 +7,26 @@ namespace KeepDriving
 {
     internal sealed class FieldPager
     {
-        private sealed class Ticket
-        {
-            public readonly string Node, Subject;
-            public bool Unread = true, Pinned, Arrived, Checked, Verified, Closed;
-            public int Repairs;
-            public string Log = "Local service interface connected.\n";
-            public Ticket(string node, string subject) { Node = node; Subject = subject; }
-            public void Write(string line) => Log += line + "\n";
-        }
-
         private readonly Ticket[] tickets =
         {
             new("HC-017", "Missed check-ins"),
             new("HC-042", "Low charging output"),
-            new("HC-063", "Weak transmission")
+            new("HC-063", "Weak transmission"),
+            new("HC-062", "Bad cat"),
+            new("HC-163", "Dog will not pee"),
+            new("HC-666", "Girlfriend is mad"),
+            new("HC-65060", "Probably breaking up")
         };
+
         private readonly ControllerFailureTicket controller = new();
         private static readonly Color Ink = new(.10f, .15f, .08f);
         private static readonly Color Paper = new(.90f, .87f, .78f);
         private static readonly Color Amber = new(1f, .75f, .37f);
         private GUIStyle heading, text, lcdText, lcdHeading, lcdButton, action;
         private int current = -1, selection;
-        private Vector2 scroll;
+        private static readonly Rect InboxViewport = new(35f, 137f, 283f, 220f);
+        private const float InboxRowHeight = 66f;
+        private Vector2 inboxScroll, scroll;
         public bool IsOpen { get; private set; }
 
         public void Open() => IsOpen = true;
@@ -71,7 +68,9 @@ namespace KeepDriving
             Fill(new Rect(0, 40, 352, 416), new Color(.10f, .10f, .08f), 34);
             Fill(new Rect(1, 41, 350, 408), new Color(.26f, .25f, .21f), 33);
             GUI.Label(new Rect(22, 55, 270, 22), "H O R I Z O N   C H A I N", text);
-            int unread = Array.FindAll(tickets, ticket => ticket.Unread).Length;
+            int unread = 0;
+            foreach (var message in tickets)
+                if (message.Unread) unread++;
             Fill(new Rect(312, 59, 11, 11), unread > 0 ? Amber : new Color(.35f, .29f, .16f), 6);
             Fill(new Rect(17, 82, 318, 290), new Color(.08f, .10f, .07f), 17);
             Fill(new Rect(24, 89, 304, 276), new Color(.65f, .74f, .46f), 12);
@@ -80,7 +79,7 @@ namespace KeepDriving
 
             bool inbox = current < 0;
             Ticket ticket = inbox ? null : tickets[current];
-            string status = inbox ? (unread > 0 ? $"{unread} NEW" : "3 MESSAGES") : Status(ticket);
+            string status = inbox ? (unread > 0 ? $"{unread} NEW" : $"{tickets.Length} MESSAGES") : Status(ticket);
             GUI.Label(new Rect(38, 99, 278, 25), $"{(inbox ? "DISPATCH" : $"FS-{current + 1:000}")}    {status}", lcdText);
             Fill(new Rect(38, 125, 276, 1), Ink);
             (string Label, Action Activate)[] rows;
@@ -94,31 +93,53 @@ namespace KeepDriving
                     rows[i] = ($"{(item.Unread ? "• " : "")}{item.Node}\n{(item.Closed ? "Ticket closed" : item.Verified ? "Service restored" : item.Subject)}",
                         () => { current = index; item.Unread = false; selection = 0; scroll = Vector2.zero; });
                 }
-                DrawRows(rows, 137, 66);
+                float contentHeight = rows.Length * InboxRowHeight;
+                float rowWidth = InboxViewport.width;
+                if (contentHeight > InboxViewport.height)
+                {
+                    var scrollbar = GUI.skin.verticalScrollbar;
+                    rowWidth -= scrollbar.fixedWidth + scrollbar.margin.left + scrollbar.margin.right;
+                }
+                inboxScroll = GUI.BeginScrollView(InboxViewport, inboxScroll,
+                    new Rect(0f, 0f, rowWidth, contentHeight), false, false);
+                DrawRows(rows, 0f, 0f, rowWidth, InboxRowHeight);
+                GUI.EndScrollView();
             }
             else
             {
                 GUI.Label(new Rect(38, 136, 270, 40), ticket.Node, lcdHeading);
                 GUI.Label(new Rect(38, 183, 267, 46), ticket.Subject, lcdText);
                 Fill(new Rect(38, 232, 276, 1), Ink);
-                var back = ("Back to inbox", (Action)(() => { current = -1; selection = 0; }));
+                var back = ("Back to inbox", (Action)(() => { selection = current; current = -1; }));
                 var pin = (ticket.Pinned ? "Remove map marker" : "Mark on map", (Action)(() => ticket.Pinned = !ticket.Pinned));
                 rows = ticket.Closed ? new[] { back } : ticket.Verified
                     ? new[] { ("Close ticket", (Action)(() => CloseTicket(ticket))), pin, back }
                     : new[] { pin, back };
-                DrawRows(rows, 240, 37);
+                DrawRows(rows, 35f, 240f, 283f, 37f);
             }
 
-            if (GUI.Button(new Rect(23, 388, 96, 43), "▲", action)) selection = (selection + rows.Length - 1) % rows.Length;
-            if (GUI.Button(new Rect(128, 388, 96, 43), "●", action)) rows[Mathf.Clamp(selection, 0, rows.Length - 1)].Activate();
-            if (GUI.Button(new Rect(233, 388, 96, 43), "▼", action)) selection = (selection + 1) % rows.Length;
+            if (GUI.Button(new Rect(23, 388, 96, 43), "▲", action)) MoveSelection(-1, rows.Length, inbox);
+            if (GUI.Button(new Rect(128, 388, 96, 43), "●", action) && rows.Length > 0) rows[Mathf.Clamp(selection, 0, rows.Length - 1)].Activate();
+            if (GUI.Button(new Rect(233, 388, 96, 43), "▼", action)) MoveSelection(1, rows.Length, inbox);
         }
 
-        private void DrawRows((string Label, Action Activate)[] rows, float top, float height)
+        private void MoveSelection(int delta, int rowCount, bool inbox)
+        {
+            if (rowCount == 0) return;
+            selection = (selection + delta + rowCount) % rowCount;
+            if (!inbox) return;
+
+            float top = selection * InboxRowHeight;
+            float bottom = top + InboxRowHeight;
+            if (top < inboxScroll.y) inboxScroll.y = top;
+            else if (bottom > inboxScroll.y + InboxViewport.height) inboxScroll.y = bottom - InboxViewport.height;
+        }
+
+        private void DrawRows((string Label, Action Activate)[] rows, float left, float top, float width, float height)
         {
             for (int i = 0; i < rows.Length; i++)
             {
-                var rect = new Rect(35, top + i * height, 283, height - 4);
+                var rect = new Rect(left, top + i * height, width, height - 4);
                 if (selection == i) Fill(rect, new Color(.43f, .55f, .29f), 4);
                 if (GUI.Button(rect, (selection == i ? "› " : "  ") + rows[i].Label, lcdButton))
                     rows[i].Activate();
