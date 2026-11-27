@@ -30,6 +30,7 @@ namespace KeepDriving
         const float WalkSpeed = 5f;
         readonly Collider[] exitHits = new Collider[16];
         readonly RaycastHit[] groundHits = new RaycastHit[32];
+        int carGroundMask = ~0;
         readonly RaycastHit[] cameraHits = new RaycastHit[32];
         Vector3 carVelocity;
         Renderer seatedDriver, seatedTorso;
@@ -51,6 +52,7 @@ namespace KeepDriving
                 minimap = terrainStream.GetComponent<Minimap>();
             }
             InitializeCarMotion();
+            carGroundMask = ~LayerMask.GetMask("Tree Trunks");
             car.isKinematic = true;
             carBody = car.transform.Find("Rectangle Body");
             carAudio = car.GetComponent<CarAudio>();
@@ -351,7 +353,7 @@ namespace KeepDriving
         {
             ground = default;
             float nearest = float.PositiveInfinity;
-            int count = Physics.RaycastNonAlloc(point + Vector3.up * 20, Vector3.down, groundHits, 60, ~0, QueryTriggerInteraction.Ignore);
+            int count = Physics.RaycastNonAlloc(point + Vector3.up * 20, Vector3.down, groundHits, 60, carGroundMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < count; i++)
             {
                 var hit = groundHits[i];

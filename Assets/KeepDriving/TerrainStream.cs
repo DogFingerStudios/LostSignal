@@ -76,6 +76,7 @@ namespace KeepDriving
         private float[,] _sourceHeights;
         private float _datumOffset, _baseY, _heightRange, _sourceHeightSize;
         private GameObject _sitesRoot;
+        private GameObject _startingTreeColliders;
         private static readonly ProfilerMarker PrepareTileMarker = new("TerrainStream.PrepareTile");
         private static readonly ProfilerMarker InstallTileMarker = new("TerrainStream.InstallTile");
         private static readonly ProfilerMarker UnloadTilesMarker = new("TerrainStream.UnloadTiles");
@@ -386,6 +387,7 @@ namespace KeepDriving
             // Keep the scene GameObject and any authored children alive.
             _startingTerrain.enabled = loaded;
             _startingCollider.enabled = loaded;
+            if (_startingTreeColliders) _startingTreeColliders.SetActive(loaded);
             if (_routeMeshes.TryGetValue(_startingTerrain, out var routes))
                 foreach (var route in routes) route.gameObject.SetActive(loaded);
         }
@@ -775,6 +777,36 @@ namespace KeepDriving
             }
             data.treePrototypes = prototypes.ToArray();
             data.SetTreeInstances(instances.ToArray(), true);
+            InstallTreeColliders(terrain, trees);
+        }
+
+        private void InstallTreeColliders(Terrain terrain, TreeInstance[] trees)
+        {
+            var root = new GameObject("Woodland trunk colliders");
+            root.layer = LayerMask.NameToLayer("Tree Trunks");
+            root.transform.SetParent(terrain.transform, false);
+            if (terrain == _startingTerrain) _startingTreeColliders = root;
+
+            TerrainData data = terrain.terrainData;
+            Vector3 size = data.size;
+            var trunks = new CapsuleCollider[_woodlandPrototypes.Length];
+            for (int i = 0; i < trunks.Length; i++)
+                trunks[i] = _woodlandPrototypes[i].prefab.GetComponent<CapsuleCollider>();
+
+            foreach (var tree in trees)
+            {
+                var trunk = trunks[tree.prototypeIndex];
+                float radius = (trunk ? trunk.radius : .2f) * tree.widthScale;
+                float height = (trunk ? trunk.height : 2.5f) * tree.heightScale;
+                float centerY = (trunk ? trunk.center.y : 1.15f) * tree.heightScale;
+                Vector3 point = tree.position;
+                var collider = root.AddComponent<CapsuleCollider>();
+                collider.center = new Vector3(point.x * size.x,
+                    data.GetInterpolatedHeight(point.x, point.z) + centerY, point.z * size.z);
+                collider.radius = radius;
+                collider.height = Mathf.Max(height, radius * 2f);
+            }
+
         }
 
         private void AddLandRoute(string type, float width, float heightOffset, Color color, Color mapColor, float mapWidth)
