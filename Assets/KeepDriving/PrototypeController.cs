@@ -64,6 +64,7 @@ namespace KeepDriving
         TrailRenderer[] skidMarks;
         Material skidMaterial;
         FieldReceiverUI fieldReceiver;
+        FieldPager fieldPager;
         TerminalScreen terminalScreen;
         Terminal activeTerminal;
         Minimap minimap;
@@ -175,6 +176,7 @@ namespace KeepDriving
 
         void Update()
         {
+            fieldPager?.Advance(Time.unscaledDeltaTime);
             if (terrainStream) terrainStream.Pump(driving ? car.position : player.transform.position);
             bool settledTruck = false;
             foreach (var truck in workTrucks)
@@ -190,6 +192,15 @@ namespace KeepDriving
             var keys = Keyboard.current;
             int zoom = (keys?.equalsKey.wasPressedThisFrame == true ? 1 : 0)
                 - (keys?.minusKey.wasPressedThisFrame == true ? 1 : 0);
+            if (fieldPager?.IsOpen == true)
+            {
+                if (keys?.pKey.wasPressedThisFrame == true || keys?.escapeKey.wasPressedThisFrame == true)
+                {
+                    fieldPager.Close();
+                    LockCursor();
+                }
+                return;
+            }
             if (terminalScreen?.IsOpen == true)
             {
                 if (!activeTerminal || !activeTerminal.isActiveAndEnabled || keys?.escapeKey.wasPressedThisFrame == true)
@@ -213,6 +224,17 @@ namespace KeepDriving
                     LockCursor();
                 }
                 else if (zoom != 0) worldMap.Zoom(zoom);
+                return;
+            }
+            if (keys?.pKey.wasPressedThisFrame == true)
+            {
+                fieldPager ??= new FieldPager();
+                fieldPager.Open();
+                lastEscape = -10f;
+                quitHintUntil = 0f;
+                if (horn && horn.isPlaying) horn.Stop();
+                if (footsteps) footsteps.Stop();
+                UnlockCursor();
                 return;
             }
             if (keys != null && keys.iKey.wasPressedThisFrame)
@@ -853,6 +875,11 @@ namespace KeepDriving
 
         void OnDisable()
         {
+            if (fieldPager?.IsOpen == true)
+            {
+                fieldPager.Close();
+                LockCursor();
+            }
             if (terminalScreen?.IsOpen == true) CloseTerminal();
             if (fieldReceiver?.IsOpen != true) return;
             fieldReceiver.Close();
@@ -879,6 +906,12 @@ namespace KeepDriving
                 return;
             }
 
+            if (fieldPager?.IsOpen == true)
+            {
+                fieldPager.Draw();
+                return;
+            }
+
             if (worldMap && worldMap.IsOpen)
             {
                 if (Event.current.type == EventType.Repaint)
@@ -896,8 +929,8 @@ namespace KeepDriving
             }
 
             GUI.Box(new Rect(16, 16, 650, 80), driving
-                ? "DRIVING   |   W accelerate   ·   S brake/reverse   ·   A/D steer   ·   Shift boost   ·   Space handbrake\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   M world map   ·   = / - minimap zoom"
-                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   M world map   ·   = / - minimap zoom");
+                ? "DRIVING   |   W accelerate   ·   S brake/reverse   ·   A/D steer   ·   Shift boost   ·   Space handbrake\nMouse look   ·   RMB horn   ·   E leave   ·   ` camera   ·   Double Esc quit\nI field receiver   ·   P pager   ·   M world map   ·   = / - minimap zoom"
+                : "WALKING   |   WASD move   ·   Shift sprint   ·   Mouse look   ·   Space jump\nE enter nearby car   ·   ` switch camera   ·   Double Esc quit\nI field receiver   ·   P pager   ·   M world map   ·   = / - minimap zoom");
 
             if (driving)
             {
@@ -939,6 +972,6 @@ namespace KeepDriving
         }
 
         bool WaitingForTerrain => terrainStream != null && terrainStream.HasSource && !terrainStream.InitialWindowReady;
-        bool ModalOpen => (worldMap && worldMap.IsOpen) || fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
+        bool ModalOpen => fieldPager?.IsOpen == true || (worldMap && worldMap.IsOpen) || fieldReceiver?.IsOpen == true || terminalScreen?.IsOpen == true;
     }
 }
