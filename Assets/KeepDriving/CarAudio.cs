@@ -13,7 +13,13 @@ namespace KeepDriving
         [SerializeField] AudioClip pavementClip;
         [SerializeField] AudioClip gravelClip;
 
-        AudioSource idle, engine, boost, pavement, gravel;
+        [Header("Collision one-shots")]
+        [SerializeField] AudioClip lowSpeedImpactClip;
+        [SerializeField] AudioClip metalCrunchClip;
+        [SerializeField] AudioClip hardImpactClip;
+
+        AudioSource idle, engine, boost, pavement, gravel, impact;
+        float nextImpactTime;
         bool wasBoosting;
 
         internal AudioMixerGroup SfxGroup => sfxGroup;
@@ -27,6 +33,11 @@ namespace KeepDriving
             boost = CreateSource(boostClip, false, .7f);
             pavement = CreateSource(pavementClip, true, 0f);
             gravel = CreateSource(gravelClip, true, .7f);
+
+            AudioClip initialImpact = lowSpeedImpactClip ? lowSpeedImpactClip
+                : (metalCrunchClip ? metalCrunchClip : hardImpactClip);
+            impact = CreateSource(initialImpact, false, .65f);
+            if (impact) impact.volume = 1f;
         }
 
         AudioSource CreateSource(AudioClip clip, bool loop, float spatialBlend)
@@ -74,6 +85,21 @@ namespace KeepDriving
             wasBoosting = driving && boosting;
         }
 
+        internal void PlayImpact(float speedIntoSurface)
+        {
+            const float minimumSpeed = 1.1f;
+            if (!isActiveAndEnabled || !impact || speedIntoSurface < minimumSpeed ||
+                Time.unscaledTime < nextImpactTime) return;
+
+            AudioClip clip = speedIntoSurface >= 8f ? hardImpactClip
+                : (speedIntoSurface >= 3.5f ? metalCrunchClip : lowSpeedImpactClip);
+            if (!clip) clip = impact.clip;
+
+            nextImpactTime = Time.unscaledTime + .4f;
+            float strength = Mathf.InverseLerp(minimumSpeed, 14f, speedIntoSurface);
+            impact.PlayOneShot(clip, Mathf.Lerp(.20f, .85f, strength));
+        }
+
         static void SetLoop(AudioSource source, float volume, float pitch, float dt)
         {
             if (!source) return;
@@ -94,6 +120,8 @@ namespace KeepDriving
             if (boost) boost.Stop();
             if (pavement) pavement.Stop();
             if (gravel) gravel.Stop();
+            if (impact) impact.Stop();
+            nextImpactTime = 0f;
             wasBoosting = false;
         }
 
@@ -104,6 +132,7 @@ namespace KeepDriving
             if (boost) Destroy(boost);
             if (pavement) Destroy(pavement);
             if (gravel) Destroy(gravel);
+            if (impact) Destroy(impact);
         }
     }
 }

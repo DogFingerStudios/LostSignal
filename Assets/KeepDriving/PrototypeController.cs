@@ -351,6 +351,11 @@ namespace KeepDriving
                 {
                     next = position + direction * Mathf.Clamp(hit.distance - TreeContactGap, 0f, distance);
                     Vector3 horizontalNormal = Vector3.ProjectOnPlane(hit.normal, Vector3.up).normalized;
+                    if (carAudio)
+                    {
+                        Vector3 impactVelocity = carVelocity + Vector3.up * carVerticalSpeed;
+                        carAudio.PlayImpact(-Vector3.Dot(impactVelocity, hit.normal));
+                    }
                     float inwardSpeed = Vector3.Dot(carVelocity, horizontalNormal);
                     if (inwardSpeed < 0f) carVelocity -= horizontalNormal * inwardSpeed;
                     if (carGrounded)
