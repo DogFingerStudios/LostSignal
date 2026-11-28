@@ -13,7 +13,6 @@ public class NodeManager : MonoBehaviour
     {
         if (!_nodes.Contains(node))
         {
-            Debug.Log($"Registering node: {node.name}");
             _nodes.Add(node);
         }
     }
@@ -22,7 +21,6 @@ public class NodeManager : MonoBehaviour
     {
         if (_nodes.Contains(node))
         {
-            Debug.Log($"Unregistering node: {node.name}");
             _nodes.Remove(node);
         }
     }

@@ -7,42 +7,65 @@ using static UnityEngine.Rendering.DebugUI;
 public class Node : MonoBehaviour
 {
     [SerializeField] 
-    private string _nodeName;
-    public string NodeName
-    {
-        get => _nodeName;
-        set => _nodeName = value;
-    }
+    public string NodeName;
 
     [SerializeField]
-    private float _range;
+    private int _batteryCount = 1;
+    public int BatteryCount => _batteryCount;
+
+    [SerializeField]
+    private float _range = 100f;
     public float Range => _range;
 
-    SolarPanel[] _solarPanels;
-    Battery[] _batteries;
-    RFCable[] _cables;
-    Antenna _antenna;
-    TimingOscillator _timingOscillator;
-    NodeController _nodeController;
-    //RadioTransmitter _transmitter
+    private SolarPanel[] _solarPanels;
+    public SolarPanel[] SolarPanels => _solarPanels;
+    
+    private Battery[] _batteries;
+    public Battery[] Batteries => _batteries;
+    
+    private RFCable[] _cables;
+    public RFCable[] Cables => _cables;
+
+    private Antenna _antenna;
+    public Antenna Antenna => _antenna;
+
+    private TimingOscillator _timingOscillator;
+    public TimingOscillator TimingOscillator => _timingOscillator;
+
+    private NodeController _nodeController;
+    public NodeController NodeController => _nodeController;
+
+    // private RadioTransmitter _transmitter;
+    // public RadioTransmitter Transmitter => _transmitter;
 
     private float _timer;
-    private const float Interval = 0.5f;
+    private const float Interval = 0.5f; // Interval for emitting signals in seconds
 
-    void Awake()
+    // the condition of the node, representing its health or operational status
+    // Value ranges from 0 (completely non-functional) to 1 (fully operational)
+    private float _condition;
+    public float Condition => _condition;
+
+    public void Init()
     {
-        NodeManager.Instance.RegisterNode(this);
+        _batteries = new Battery[_batteryCount];
+
+        for (int i = 0; i < _batteries.Length; i++)
+        {
+            _batteries[i] = new Battery();
+        }
+
+        // NodeManager.Instance.RegisterNode(this);
+    }
+
+    void Start()
+    {
+        Init();
     }
 
     void OnDestroy()
     {
         NodeManager.Instance.UnregisterNode(this);
-    }
-
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        
     }
 
     // Update is called once per frame
@@ -55,6 +78,24 @@ public class Node : MonoBehaviour
             EmitSignal();
             _timer -= Interval; // Subtracts the interval instead of resetting to 0 to prevent timing drift
         }
+    }
+
+    float TotalBatteryCapacityPercent()
+    {
+        if (_batteries == null || _batteries.Length == 0)
+        {
+            return 0.0f;
+        }
+
+        float totalCapacity = 0.0f;
+        float totalCharge = 0.0f;
+        foreach (var battery in _batteries)
+        {
+            totalCapacity += battery.CapacityWattHours;
+            totalCharge += battery.CurrentChargeWattHours;
+        }
+
+        return totalCapacity > 0 ? (totalCharge / totalCapacity) * 100.0f : 0.0f;
     }
 
     private void EmitSignal()
