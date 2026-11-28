@@ -37,6 +37,7 @@ namespace KeepDriving
         {
             public Rigidbody Body;
             public BoxCollider Box;
+            public Vector3[] TireContacts;
             public YanorraMap.Point? Site;
             public bool WaitingForTerrain;
         }
@@ -52,7 +53,7 @@ namespace KeepDriving
         const float WalkSpeed = 5f;
         readonly Collider[] exitHits = new Collider[16];
         readonly RaycastHit[] groundHits = new RaycastHit[32];
-        int carGroundMask = ~0;
+        const float TireGroundGap = .01f;
         int treeTrunkMask;
         BoxCollider carBox;
         const float TreeContactGap = .02f;
@@ -74,6 +75,7 @@ namespace KeepDriving
 
         void Start()
         {
+            treeTrunkMask = LayerMask.GetMask("Tree Trunks");
             footsteps = player.GetComponent<PlayerFootsteps>();
             if (terrainStream)
             {
@@ -86,12 +88,14 @@ namespace KeepDriving
                     Debug.LogError("Assign the WorkTruck prefab on the Prototype Controller.", this);
                 if (workTruckPrefab)
                 {
+                    Physics.SyncTransforms();
                     foreach (var site in terrainStream.WorkTruckSites)
                     {
                         bool ready = terrainStream.GetVehicleSpawn(site, out var position);
                         var truck = SpawnWorkTruck(position, Quaternion.Euler(0f, site.Heading, 0f));
                         truck.Site = site;
                         truck.WaitingForTerrain = !ready;
+                        if (ready) PlaceTruckOnGround(truck, position, truck.Body.rotation);
                     }
                 }
                 yaw = terrainStream.SpawnHeading;
@@ -109,9 +113,57 @@ namespace KeepDriving
                 if (worldMap) worldMap.TrackMarker(marker);
                 if (minimap) minimap.TrackMarker(marker);
             }
-            var truck = new WorkTruck { Body = body, Box = body.GetComponent<BoxCollider>() };
+            var truck = new WorkTruck
+            {
+                Body = body,
+                Box = body.GetComponent<BoxCollider>(),
+                TireContacts = GetTireContacts(body.transform)
+            };
             workTrucks.Add(truck);
             return truck;
+        }
+
+        static Vector3[] GetTireContacts(Transform root)
+        {
+            var model = root.Find("ZIL model");
+            var frontLeft = model ? model.Find("Truck_Wheel_FL")?.GetComponent<MeshFilter>() : null;
+            var frontRight = model ? model.Find("Truck_Wheel_FR")?.GetComponent<MeshFilter>() : null;
+            var rear = model ? model.Find("Truck_Wheel_AR")?.GetComponent<MeshFilter>() : null;
+            if (!frontLeft || !frontRight || !rear || !frontLeft.sharedMesh || !frontRight.sharedMesh || !rear.sharedMesh)
+                return new Vector3[]
+                {
+                    new(-.9f, -.74f, 2.22f), new(.9f, -.74f, 2.22f),
+                    new(-.9f, -.74f, -1.58f), new(.9f, -.74f, -1.58f)
+                };
+
+            // The rear mesh contains both tire sets. Sample the middle of each half.
+            return new Vector3[]
+            {
+                TireContact(root, frontLeft, 0f),
+                TireContact(root, frontRight, 0f),
+                TireContact(root, rear, -.25f),
+                TireContact(root, rear, .25f)
+            };
+        }
+
+        static Vector3 TireContact(Transform root, MeshFilter tire, float lateralFraction)
+        {
+            Bounds bounds = tire.sharedMesh.bounds;
+            Vector3 tread = bounds.center;
+            tread.x += bounds.size.x * lateralFraction;
+            tread.y = bounds.min.y;
+            return root.InverseTransformPoint(tire.transform.TransformPoint(tread));
+        }
+
+        void PlaceTruckOnGround(WorkTruck truck, Vector3 position, Quaternion heading)
+        {
+            if (GroundPose(truck, position, heading, 1f, out float height, out Quaternion rotation))
+            {
+                position.y = height;
+                heading = rotation;
+            }
+            truck.Body.position = position;
+            truck.Body.rotation = heading;
         }
 
         void SelectWorkTruck(WorkTruck truck)
@@ -138,8 +190,6 @@ namespace KeepDriving
             car = truck.Body;
 
             InitializeCarMotion();
-            treeTrunkMask = LayerMask.GetMask("Tree Trunks");
-            carGroundMask = ~treeTrunkMask;
             carBox = truck.Box;
             car.isKinematic = true;
             carBody = car.transform.Find("Rectangle Body");
@@ -183,7 +233,8 @@ namespace KeepDriving
             {
                 if (!truck.Body || !truck.WaitingForTerrain || !truck.Site.HasValue) continue;
                 if (!terrainStream.GetVehicleSpawn(truck.Site.Value, out var position)) continue;
-                truck.Body.position = position;
+                if (!settledTruck) Physics.SyncTransforms();
+                PlaceTruckOnGround(truck, position, Quaternion.Euler(0f, truck.Site.Value.Heading, 0f));
                 truck.WaitingForTerrain = false;
                 settledTruck = true;
             }
@@ -438,7 +489,7 @@ namespace KeepDriving
             float gravity = Physics.gravity.y;
             float predictedHeight = position.y + (carVerticalSpeed + .5f * gravity * dt) * dt;
             Quaternion rotation = car.rotation;
-            if (GroundPose(next, flat, dt, out float supportHeight, out Quaternion supportRotation)
+            if (GroundPose(activeTruck, next, flat, 1f - Mathf.Exp(-10f * dt), out float supportHeight, out Quaternion supportRotation)
                 && carMotion.HasGroundContact(supportHeight, predictedHeight, carGrounded, carVelocity.magnitude))
             {
                 next.y = supportHeight;
@@ -458,6 +509,12 @@ namespace KeepDriving
                 var site = activeTruck.Site.Value;
                 activeTruck.WaitingForTerrain = !terrainStream.GetVehicleSpawn(site, out next);
                 rotation = Quaternion.Euler(0f, site.Heading, 0f);
+                if (!activeTruck.WaitingForTerrain
+                    && GroundPose(activeTruck, next, rotation, 1f, out float resetHeight, out Quaternion resetRotation))
+                {
+                    next.y = resetHeight;
+                    rotation = resetRotation;
+                }
                 carVelocity = Vector3.zero;
                 carVerticalSpeed = 0f;
                 carGrounded = true;
@@ -527,10 +584,10 @@ namespace KeepDriving
 
         static float Axis(bool positive, bool negative) => (positive ? 1f : 0f) - (negative ? 1f : 0f);
 
-        bool GroundPose(Vector3 next, Quaternion flat, float dt, out float height, out Quaternion rotation)
+        bool GroundPose(WorkTruck truck, Vector3 next, Quaternion flat, float tiltBlend, out float height, out Quaternion rotation)
         {
             height = 0f;
-            rotation = car.rotation;
+            rotation = truck.Body.rotation;
             if (!GroundAt(next, out var center)) return false;
 
             Vector3 forward = flat * Vector3.forward;
@@ -540,18 +597,16 @@ namespace KeepDriving
             if (GroundAt(next + forward * 2.2f, out var f) && GroundAt(next - forward * 2.2f, out var b)
                 && GroundAt(next + right * .9f, out var r) && GroundAt(next - right * .9f, out var l))
                 normal = Vector3.Cross(f.point - b.point, r.point - l.point).normalized;
-            float tiltBlend = 1f - Mathf.Exp(-10f * dt);
-            Vector3 up = Vector3.Slerp(car.rotation * Vector3.up, normal, tiltBlend);
+            Vector3 up = Vector3.Slerp(truck.Body.rotation * Vector3.up, normal, tiltBlend);
             rotation = Quaternion.LookRotation(Vector3.ProjectOnPlane(forward, up), up);
-            height = center.point.y + .75f;
-            for (int x = -1; x <= 1; x += 2)
-            for (int z = -1; z <= 1; z += 2)
+            height = float.NegativeInfinity;
+            foreach (Vector3 contact in truck.TireContacts)
             {
-                // Approximate the ZIL's axle locations in car-root meters.
-                float axleZ = z < 0 ? -1.58f : 2.22f;
-                Vector3 corner = rotation * new Vector3(x * .9f, -.7f, axleZ);
-                if (GroundAt(next + corner, out var support)) height = Mathf.Max(height, support.point.y - corner.y + .05f);
+                Vector3 tread = rotation * contact;
+                if (GroundAt(next + tread, out var support))
+                    height = Mathf.Max(height, support.point.y - tread.y + TireGroundGap);
             }
+            if (float.IsNegativeInfinity(height)) height = center.point.y + .75f;
             return true;
         }
 
@@ -559,7 +614,7 @@ namespace KeepDriving
         {
             ground = default;
             float nearest = float.PositiveInfinity;
-            int count = Physics.RaycastNonAlloc(point + Vector3.up * 20, Vector3.down, groundHits, 60, carGroundMask, QueryTriggerInteraction.Ignore);
+            int count = Physics.RaycastNonAlloc(point + Vector3.up * 20, Vector3.down, groundHits, 60, ~treeTrunkMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < count; i++)
             {
                 var hit = groundHits[i];
