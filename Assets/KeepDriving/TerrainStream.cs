@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Profiling;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -18,7 +19,9 @@ namespace KeepDriving
         [SerializeField] private TextAsset elevationControlPoints;
         [SerializeField] private Node satelliteDish;
         [SerializeField] private TextAsset roadsGeoJson;
-        [SerializeField] private Shader dirtRoadShader;
+        [SerializeField] private Material dirtRoadMaterial;
+        [SerializeField] private Material serviceTrackMaterial;
+        [SerializeField] private Material footpathMaterial;
         [SerializeField] private TextAsset waterwaysGeoJson;
         [SerializeField] private TextAsset waterBodiesGeoJson;
 
@@ -138,11 +141,11 @@ namespace KeepDriving
             _baseY = Mathf.Min(_origin.y, _elevation.Min + _datumOffset) - RiverDepth;
             _heightRange = Mathf.Max(_origin.y + _sourceData.size.y, _elevation.Max + _datumOffset) - _baseY;
             _source.allowAutoConnect = false;
-            if (roadsGeoJson && dirtRoadShader)
+            if (roadsGeoJson)
             {
-                AddLandRoute("dirt road", 5f, .15f, new Color(.42f, .26f, .15f), new Color(.91f, .72f, .48f), 2f);
-                AddLandRoute("service track", 3f, .10f, new Color(.43f, .42f, .36f), new Color(.82f, .78f, .65f), 1.7f);
-                AddLandRoute("footpath", 1.2f, .05f, new Color(.56f, .39f, .24f), new Color(.94f, .66f, .40f), 1.3f);
+                AddLandRoute("dirt road", 5f, .15f, dirtRoadMaterial, new Color(.91f, .72f, .48f), 2f);
+                AddLandRoute("service track", 3f, .10f, serviceTrackMaterial, new Color(.82f, .78f, .65f), 1.7f);
+                AddLandRoute("footpath", 1.2f, .05f, footpathMaterial, new Color(.94f, .66f, .40f), 1.3f);
             }
 
             if (waterwaysGeoJson || waterBodiesGeoJson)
@@ -177,7 +180,7 @@ namespace KeepDriving
             AttachRoutes(_spawn.Tile, _startingTerrain, carveStartingTerrain: true);
             InstallWoodland(_startingTerrain, startingTrees);
             InstallGrassland(_startingTerrain, startingGrass);
-            InstallSites(_spawn.Tile, _startingTerrain);
+            SpawnSites();
         }
 
         public Vector3 SpawnPosition => GetSpawnPosition(Vector2.zero, 1f);
@@ -345,7 +348,7 @@ namespace KeepDriving
                     AttachRoutes(_pendingKey, terrain, carved);
                     InstallWoodland(terrain, trees);
                     InstallGrassland(terrain, grass);
-                    InstallSites(_pendingKey, terrain);
+                    AlignSitesToTerrain(_pendingKey, terrain);
                     RefreshNeighbors();
                 }
             }
@@ -594,27 +597,59 @@ namespace KeepDriving
             terrain.detailObjectDensity = _source.detailObjectDensity;
         }
 
-        private void InstallSites(Vector2Int key, Terrain terrain)
+        private void SpawnSites()
+        {
+            foreach (var (key, points) in _sites)
+            {
+                _tiles.TryGetValue(key, out var terrain);
+                foreach (var point in points)
+                {
+                    var mapPosition = new Vector2((float)point.East, (float)point.North);
+                    if (_waterBodies.Exists(body => body.ContainsPoint(mapPosition)) ||
+                        _waterways.Exists(water => water.Surface.ContainsRoute(key, mapPosition)))
+                    {
+                        Debug.LogError($"Cannot spawn map site {point.Name} ({point.Id}) in water.", this);
+                        continue;
+                    }
+
+                    if (!_sitesRoot)
+                    {
+                        _sitesRoot = new GameObject("Authored map sites");
+                        SceneManager.MoveGameObjectToScene(_sitesRoot, gameObject.scene);
+                    }
+
+                    // Off-window sites use the elevation model until their terrain tile is installed.
+                    Vector3 position = SitePosition(point, terrain);
+                    Node dish = Instantiate(satelliteDish, position, Quaternion.Euler(0, point.Heading, 0), _sitesRoot.transform);
+                    dish.NodeName = point.Name;
+                    dish.name = point.Name;
+                    dish.Init();
+                    _dishes.Add(point.Id, dish);
+                }
+            }
+        }
+
+        private void AlignSitesToTerrain(Vector2Int key, Terrain terrain)
         {
             if (!_sites.TryGetValue(key, out var points)) return;
             foreach (var point in points)
-            {
-                if (_dishes.ContainsKey(point.Id)) continue;
-                if (!_sitesRoot)
-                {
-                    _sitesRoot = new GameObject("Authored map sites");
-                    SceneManager.MoveGameObjectToScene(_sitesRoot, gameObject.scene);
-                }
+                if (_dishes.TryGetValue(point.Id, out var dish) && dish)
+                    dish.transform.position = SitePosition(point, terrain);
+        }
 
-                float x = (float)(point.East - key.x * TileSize), z = (float)(point.North - key.y * TileSize);
+        private Vector3 SitePosition(YanorraMap.Point point, Terrain terrain)
+        {
+            Vector2Int key = point.Tile;
+            float x = (float)(point.East - key.x * TileSize);
+            float z = (float)(point.North - key.y * TileSize);
+            if (terrain)
+            {
                 float height = terrain.terrainData.GetInterpolatedHeight(x / TileSize, z / TileSize);
-                Vector3 position = terrain.GetPosition() + new Vector3(x, height, z);
-                Node dish = Instantiate(satelliteDish, position, Quaternion.Euler(0, point.Heading, 0), _sitesRoot.transform);
-                Console.WriteLine($"Spawned map site {point.Name} at {position} with heading {point.Heading}");
-                dish.NodeName = point.Name;
-                dish.name = point.Name;
-                _dishes.Add(point.Id, dish);
+                return terrain.GetPosition() + new Vector3(x, height, z);
             }
+
+            return _origin + TileOffset(key - _originTile)
+                + new Vector3(x, SampleGround(point.East, point.North) - _origin.y, z);
         }
 
         private void LoadBiomeGround()
@@ -850,12 +885,11 @@ namespace KeepDriving
 
         }
 
-        private void AddLandRoute(string type, float width, float heightOffset, Color color, Color mapColor, float mapWidth)
+        private void AddLandRoute(string type, float width, float heightOffset, Material material, Color mapColor, float mapWidth)
         {
             try
             {
                 var surface = new RouteSurface(roadsGeoJson, "route_type", type, width, 4f, heightOffset, treeBuffer: RoadsideTreeBuffer);
-                var material = new Material(dirtRoadShader) { name = type, color = color };
                 _landRoutes.Add((surface, material, type, mapColor, mapWidth));
             }
             catch (Exception error)
@@ -914,7 +948,8 @@ namespace KeepDriving
             if (terrain == _startingTerrain && terrain != _source && terrain.terrainData.treeInstanceCount > 0)
                 terrain.terrainData.SetTreeInstances(terrain.terrainData.treeInstances, true);
             foreach (var route in _landRoutes)
-                AttachSurface(route.Surface.BuildTile(key, terrain.terrainData), route.Material, route.Name, terrain);
+                if (route.Material)
+                    AttachSurface(route.Surface.BuildTile(key, terrain.terrainData), route.Material, route.Name, terrain);
         }
 
         private void AttachSurface(Mesh mesh, Material material, string name, Terrain terrain)
@@ -967,7 +1002,6 @@ namespace KeepDriving
                 _source.enabled = true;
                 _sourceCollider.enabled = true;
             }
-            foreach (var route in _landRoutes) Destroy(route.Material);
             foreach (var water in _waterways) Destroy(water.Material);
             foreach (var body in _waterBodies) body.Dispose();
             if (_biomeLayers != null)

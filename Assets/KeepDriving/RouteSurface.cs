@@ -35,12 +35,35 @@ namespace KeepDriving
         {
             public readonly Vector2 LeftStart, LeftEnd, RightEnd, RightStart;
 
-            public Ribbon(Vector2 start, Vector2 end, Vector2 startSide, Vector2 endSide)
+            private readonly float _acrossLeft, _acrossRight;
+
+            public Ribbon(Vector2 start, Vector2 end, Vector2 startSide, Vector2 endSide, int strip, int strips)
             {
                 LeftStart = start + startSide;
                 LeftEnd = end + endSide;
                 RightEnd = end - endSide;
                 RightStart = start - startSide;
+                _acrossLeft = strip / (float)strips;
+                _acrossRight = (strip + 1) / (float)strips;
+            }
+
+            public float Across(Vector2 point, Vector2 origin)
+            {
+                // Interpolate inside the original ribbon, including vertices introduced by tile clipping.
+                Vector2 leftStart = LeftStart - origin;
+                Vector2 leftEnd = LeftEnd - origin;
+                Vector2 diagonal = RightEnd - origin - leftStart;
+                Vector2 offset = point - leftStart;
+                float area = Cross(leftEnd - leftStart, diagonal);
+                float rightWeight = Mathf.Abs(area) > 1e-6f ? Cross(leftEnd - leftStart, offset) / area : 0f;
+                if (Cross(diagonal, offset) * area > 0f || Mathf.Abs(area) <= 1e-6f)
+                {
+                    Vector2 rightStart = RightStart - origin;
+                    area = Cross(diagonal, rightStart - leftStart);
+                    rightWeight = Mathf.Abs(area) > 1e-6f ? Cross(diagonal - (rightStart - leftStart), offset) / area : 0f;
+                }
+
+                return Mathf.Lerp(_acrossLeft, _acrossRight, rightWeight);
             }
         }
 
@@ -129,7 +152,7 @@ namespace KeepDriving
                     {
                         float center = 1f - (2f * strip + 1f) / strips;
                         Index(new Ribbon(first + firstSide * center, last + lastSide * center,
-                            firstSide / strips, lastSide / strips));
+                            firstSide / strips, lastSide / strips, strip, strips));
                     }
                 }
             }
@@ -310,6 +333,8 @@ namespace KeepDriving
         {
             if (!_tiles.TryGetValue(key, out var ribbons)) return null;
             var vertices = new List<Vector3>();
+            var normals = _channelDepth > 0 ? null : new List<Vector3>();
+            var surfaceCoords = _channelDepth > 0 ? null : new List<Vector3>();
             var indices = new List<int>();
             var polygon = new List<Vector2>(8);
             var clipped = new List<Vector2>(8);
@@ -330,8 +355,15 @@ namespace KeepDriving
 
                 int start = vertices.Count;
                 foreach (var point in polygon)
-                    vertices.Add(new Vector3(point.x,
-                        terrain.GetInterpolatedHeight(point.x / TileSize, point.y / TileSize) + _heightOffset, point.y));
+                {
+                    float u = point.x / TileSize, v = point.y / TileSize;
+                    vertices.Add(new Vector3(point.x, terrain.GetInterpolatedHeight(u, v) + _heightOffset, point.y));
+                    if (normals != null)
+                    {
+                        normals.Add(terrain.GetInterpolatedNormal(u, v));
+                        surfaceCoords.Add(new Vector3(origin.x + point.x, origin.y + point.y, ribbon.Across(point, origin)));
+                    }
+                }
                 for (int i = 1; i + 1 < polygon.Count; i++)
                 {
                     indices.Add(start);
@@ -344,6 +376,11 @@ namespace KeepDriving
             var mesh = new Mesh { name = "Route surface" };
             if (vertices.Count > ushort.MaxValue) mesh.indexFormat = IndexFormat.UInt32;
             mesh.SetVertices(vertices);
+            if (normals != null)
+            {
+                mesh.SetNormals(normals);
+                mesh.SetUVs(0, surfaceCoords);
+            }
             mesh.SetTriangles(indices, 0);
             return mesh;
         }
