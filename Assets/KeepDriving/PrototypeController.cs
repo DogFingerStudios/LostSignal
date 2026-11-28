@@ -38,8 +38,43 @@ namespace KeepDriving
             public Rigidbody Body;
             public BoxCollider Box;
             public Vector3[] TireContacts;
+            public WheelVisual[] Wheels = System.Array.Empty<WheelVisual>();
             public YanorraMap.Point? Site;
             public bool WaitingForTerrain;
+        }
+
+        sealed class WheelVisual
+        {
+            const float MaxSteeringAngle = 35f;
+
+            readonly Transform wheel;
+            readonly Quaternion restRotation;
+            readonly Vector3 centerOffset;
+            readonly Vector3 axleCenter;
+            readonly float radius;
+            readonly bool steers;
+            float spinAngle;
+
+            public WheelVisual(MeshFilter mesh, bool steers)
+            {
+                wheel = mesh.transform;
+                restRotation = wheel.localRotation;
+                Bounds bounds = mesh.sharedMesh.bounds;
+                centerOffset = Vector3.Scale(bounds.center, wheel.localScale);
+                axleCenter = wheel.localPosition + restRotation * centerOffset;
+                radius = Mathf.Max(.01f, wheel.TransformVector(Vector3.up * bounds.extents.y).magnitude);
+                this.steers = steers;
+            }
+
+            public void UpdatePose(float distance, float steering)
+            {
+                spinAngle = (spinAngle + distance / radius * Mathf.Rad2Deg) % 360f;
+                Quaternion steerRotation = Quaternion.AngleAxis(steers ? steering * MaxSteeringAngle : 0f, Vector3.up);
+                Quaternion spinRotation = Quaternion.AngleAxis(spinAngle, Vector3.right);
+                // Use the model's axle direction for both front wheels, including the mirrored one.
+                wheel.localRotation = steerRotation * spinRotation * restRotation;
+                wheel.localPosition = axleCenter - wheel.localRotation * centerOffset;
+            }
         }
 
         readonly List<WorkTruck> workTrucks = new();
@@ -116,16 +151,17 @@ namespace KeepDriving
             var truck = new WorkTruck
             {
                 Body = body,
-                Box = body.GetComponent<BoxCollider>(),
-                TireContacts = GetTireContacts(body.transform)
+                Box = body.GetComponent<BoxCollider>()
             };
+            truck.TireContacts = InitializeWheels(truck);
             workTrucks.Add(truck);
             return truck;
         }
 
-        static Vector3[] GetTireContacts(Transform root)
+        static Vector3[] InitializeWheels(WorkTruck truck)
         {
-            var model = root.Find("ZIL model");
+            Transform root = truck.Body.transform;
+            var model = root.Find("Rectangle Body/ZIL model");
             var frontLeft = model ? model.Find("Truck_Wheel_FL")?.GetComponent<MeshFilter>() : null;
             var frontRight = model ? model.Find("Truck_Wheel_FR")?.GetComponent<MeshFilter>() : null;
             var rear = model ? model.Find("Truck_Wheel_AR")?.GetComponent<MeshFilter>() : null;
@@ -135,6 +171,11 @@ namespace KeepDriving
                     new(-.9f, -.74f, 2.22f), new(.9f, -.74f, 2.22f),
                     new(-.9f, -.74f, -1.58f), new(.9f, -.74f, -1.58f)
                 };
+
+            truck.Wheels = new WheelVisual[]
+            {
+                new(frontLeft, true), new(frontRight, true), new(rear, false)
+            };
 
             // The rear mesh contains both tire sets. Sample the middle of each half.
             return new Vector3[]
@@ -169,6 +210,9 @@ namespace KeepDriving
         void SelectWorkTruck(WorkTruck truck)
         {
             if (activeTruck == truck) return;
+            if (activeTruck != null)
+                foreach (var wheel in activeTruck.Wheels)
+                    wheel.UpdatePose(0f, 0f);
             if (carAudio) carAudio.enabled = false;
             if (tyreSkid)
             {
@@ -504,6 +548,7 @@ namespace KeepDriving
                 carGrounded = false;
             }
 
+            float rollingDistance = 0f;
             if (terrainStream && terrainStream.HasSource && activeTruck.Site.HasValue && next.y < terrainStream.RecoveryHeight)
             {
                 var site = activeTruck.Site.Value;
@@ -522,7 +567,12 @@ namespace KeepDriving
             else
             {
                 ResolveTreeCollision(position, ref next, ref rotation);
+                // Project resolved movement onto the truck heading so sideways slip does not drive wheel spin.
+                rollingDistance = Vector3.Dot(next - position, forward);
             }
+
+            foreach (var wheel in activeTruck.Wheels)
+                wheel.UpdatePose(rollingDistance, steering);
 
             car.MoveRotation(rotation);
             car.MovePosition(next);
